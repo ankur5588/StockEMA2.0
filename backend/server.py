@@ -838,6 +838,7 @@ async def ema_sl_run(user: User = Depends(require_user)):
                         order_type="SL", product=pos.get("product") or "CNC",
                         exchange_segment=pos.get("exchange_segment", "NSE_EQ"),
                         price=limit_price, trigger_price=ema,
+                        security_id=pos.get("security_id"),
                     )
                     run.order_id = resp.get("order_id")
                 elif broker == "alice_blue":

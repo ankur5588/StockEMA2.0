@@ -15,13 +15,21 @@ logger = logging.getLogger(__name__)
 
 
 def _normalise_symbol(symbol: str, exchange_segment: str = "nse_cm") -> str:
+    """Convert a broker's trading symbol + exchange segment into a yfinance ticker.
+
+    Accepts exchange_segment strings from multiple brokers (case-insensitive):
+      - Kotak Neo: 'nse_cm', 'bse_cm'
+      - Dhan:       'NSE_EQ',  'BSE_EQ',  'NSE_FNO', 'BSE_FNO'
+      - Alice Blue: 'NSE',     'BSE',     'NFO',     'BFO'
+    Returns 'SYMBOL.NS' for NSE and 'SYMBOL.BO' for BSE.
+    """
     s = symbol.upper().strip()
-    # Remove common suffixes Kotak uses
     for suf in ("-EQ", "-BE", "-BZ", "-N1"):
         if s.endswith(suf):
             s = s[: -len(suf)]
             break
-    if exchange_segment.startswith("bse"):
+    seg = (exchange_segment or "").strip().lower()
+    if seg.startswith("bse") or seg.startswith("bfo") or seg.startswith("b_"):
         return f"{s}.BO"
     return f"{s}.NS"
 
