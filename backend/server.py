@@ -220,7 +220,9 @@ async def _get_creds_doc(user_id: str) -> Optional[dict]:
 async def save_kotak_credentials(
     payload: KotakCredentialsInput, user: User = Depends(require_user)
 ):
-    encrypted = encrypt_dict(payload.model_dump())
+    # Strip whitespace - users commonly paste with trailing spaces/newlines
+    cleaned = {k: (v.strip() if isinstance(v, str) else v) for k, v in payload.model_dump().items()}
+    encrypted = encrypt_dict(cleaned)
     existing = await _get_creds_doc(user.user_id)
     webhook_token = existing["webhook_token"] if existing else secrets.token_urlsafe(24)
     now = datetime.now(timezone.utc).isoformat()

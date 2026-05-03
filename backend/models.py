@@ -24,6 +24,7 @@ class KotakCredentialsInput(BaseModel):
     mpin: str
     consumer_key: str
     consumer_secret: str
+    environment: Optional[str] = "prod"  # "prod" or "uat"
 
 
 class KotakStatus(BaseModel):

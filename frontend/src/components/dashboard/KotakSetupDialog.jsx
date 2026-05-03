@@ -56,6 +56,20 @@ export default function KotakSetupDialog({ open, onOpenChange, reload }) {
             login and order routing.
           </DialogDescription>
         </DialogHeader>
+        <div
+          className="border border-warn/40 bg-warn/5 rounded-sm p-3 text-[11px] text-muted-foreground space-y-1.5"
+          data-testid="kotak-setup-tips"
+        >
+          <div className="text-[10px] uppercase tracking-[0.15em] text-warn font-semibold">
+            Before saving — common gotchas
+          </div>
+          <ul className="list-disc list-inside space-y-0.5 leading-relaxed">
+            <li>Use <span className="text-white">TRADE API</span> keys (not Data API)</li>
+            <li>New apps can take up to <span className="text-white">24 hours</span> to activate</li>
+            <li>Mobile must include country code (e.g. <span className="font-mono">+91...</span>)</li>
+            <li>Paste carefully — trailing spaces break the session init</li>
+          </ul>
+        </div>
         <form className="space-y-3 pt-2" onSubmit={submit}>
           <Field
             label="Mobile number"

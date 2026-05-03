@@ -36,24 +36,98 @@ def _ensure_sdk():
         raise KotakError("Kotak Neo SDK not available in this environment")
 
 
+def _strip_creds(creds: dict) -> dict:
+    """Remove whitespace noise that users often paste along with credentials."""
+    out = {}
+    for k, v in creds.items():
+        if isinstance(v, str):
+            out[k] = v.strip()
+        else:
+            out[k] = v
+    return out
+
+
 def start_login(user_id: str, creds: dict) -> dict:
-    """Step 1: create client, call login()."""
+    """Step 1: construct NeoAPI client (OAuth token exchange) and call login().
+
+    Failure modes we handle explicitly:
+      - consumer_key/consumer_secret rejected by Kotak OAuth -> bearer_token is
+        None after construction -> we raise a clear error (SDK otherwise crashes
+        with 'can only concatenate str (not NoneType) to str' when calling login).
+      - login() returns an error payload -> we inspect the status code and
+        surface Kotak's message.
+    """
     _ensure_sdk()
+    creds = _strip_creds(creds)
+    for field in ("consumer_key", "consumer_secret", "mobile", "password"):
+        if not creds.get(field):
+            raise KotakError(f"Missing field: {field}")
+    if not creds["mobile"].startswith("+"):
+        raise KotakError(
+            "Mobile number must start with country code (e.g. +91XXXXXXXXXX)"
+        )
+
     try:
         client = NeoAPI(
             consumer_key=creds["consumer_key"],
             consumer_secret=creds["consumer_secret"],
-            environment="prod",
+            environment=creds.get("environment") or "prod",
             access_token=None,
             neo_fin_key=None,
         )
-        resp = client.login(mobilenumber=creds["mobile"], password=creds["password"])
-    except KotakError:
-        raise
     except Exception as e:
-        raise KotakError(f"Kotak login failed: {e}")
+        raise KotakError(f"Kotak SDK initialisation error: {e}")
+
+    # Verify OAuth token was actually issued. If None, consumer key/secret was
+    # rejected by Kotak (they return 200 with a misleading body, SDK doesn't raise).
+    bearer = None
+    try:
+        bearer = client.api_client.configuration.bearer_token
+    except Exception:
+        pass
+    if not bearer:
+        raise KotakError(
+            "Kotak Neo rejected your consumer key/secret. "
+            "Verify on Kotak Neo app → Profile → Trade API → API Dashboard that: "
+            "(1) the app is ACTIVATED (new apps can take up to 24h), "
+            "(2) the key/secret pair has not been regenerated since you copied them, "
+            "(3) you are using the TRADE API keys (not Data API), "
+            "(4) there are no trailing spaces."
+        )
+
+    try:
+        resp = client.login(mobilenumber=creds["mobile"], password=creds["password"])
+    except Exception as e:
+        raise KotakError(f"Kotak login() failed: {e}")
+
+    # Inspect response for embedded errors Kotak returns as 4xx wrapped bodies.
+    err_msg = _extract_error_message(resp)
+    if err_msg:
+        raise KotakError(f"Kotak Neo: {err_msg}")
+
     _sessions[user_id] = {"client": client, "ucc": None, "pending_2fa": True}
     return {"ok": True, "response": _clean(resp)}
+
+
+def _extract_error_message(resp) -> Optional[str]:
+    """Detect error codes inside Kotak's inconsistent response envelopes."""
+    if not isinstance(resp, dict):
+        return None
+    # Pattern A: {"data": {"Code": 401, "Message": "..."}}
+    data = resp.get("data")
+    if isinstance(data, dict):
+        code = data.get("Code") or data.get("code")
+        message = data.get("Message") or data.get("message")
+        if code and isinstance(code, int) and not (200 <= code < 300) and message:
+            return f"[{code}] {message}"
+    # Pattern B: top-level Status / ErrorMessage
+    if resp.get("Status") in ("Error", "error") or resp.get("error"):
+        return str(resp.get("Message") or resp.get("error") or "Unknown error")
+    # Pattern C: fault.message
+    fault = resp.get("fault")
+    if isinstance(fault, dict):
+        return str(fault.get("message") or fault.get("faultstring") or "Kotak API fault")
+    return None
 
 
 def complete_2fa(user_id: str, otp: str) -> dict:
@@ -62,7 +136,15 @@ def complete_2fa(user_id: str, otp: str) -> dict:
     if not sess or not sess.get("client"):
         raise KotakError("No active login in progress. Call start_login first.")
     client: NeoAPI = sess["client"]
-    resp = client.session_2fa(OTP=otp)
+    try:
+        resp = client.session_2fa(OTP=(otp or "").strip())
+    except Exception as e:
+        raise KotakError(f"2FA verification failed: {e}")
+
+    err_msg = _extract_error_message(resp)
+    if err_msg:
+        raise KotakError(f"Kotak Neo 2FA: {err_msg}")
+
     # Extract ucc if present
     ucc = None
     try:
