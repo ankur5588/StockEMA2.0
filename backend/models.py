@@ -27,6 +27,19 @@ class KotakCredentialsInput(BaseModel):
     environment: Optional[str] = "prod"  # "prod" or "uat"
 
 
+class DhanCredentialsInput(BaseModel):
+    client_id: str
+    access_token: str
+
+
+class AliceCredentialsInput(BaseModel):
+    user_id: str  # Alice Blue user id
+    api_key: str
+
+
+BROKER_CHOICES = ("kotak_neo", "dhan", "alice_blue")
+
+
 class KotakStatus(BaseModel):
     has_credentials: bool
     is_authenticated: bool
@@ -47,6 +60,7 @@ class AlertConfigInput(BaseModel):
     quantity: int = 1
     exchange_segment: str = "nse_cm"
     product: str = "CNC"
+    broker: str = "kotak_neo"  # which broker to route to
 
 
 class AlertConfig(AlertConfigInput):

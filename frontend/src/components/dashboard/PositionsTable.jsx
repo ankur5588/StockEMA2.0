@@ -13,25 +13,25 @@ import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 
-export default function PositionsTable({ kotakAuthenticated }) {
+export default function PositionsTable({ anyAuthenticated }) {
   const [positions, setPositions] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
-    if (!kotakAuthenticated) {
+    if (!anyAuthenticated) {
       setPositions([]);
       return;
     }
     setLoading(true);
     try {
-      const res = await api.get("/kotak/positions");
+      const res = await api.get("/positions/all");
       setPositions(res.data.positions || []);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Failed to load positions");
     } finally {
       setLoading(false);
     }
-  }, [kotakAuthenticated]);
+  }, [anyAuthenticated]);
 
   useEffect(() => {
     load();
@@ -53,7 +53,7 @@ export default function PositionsTable({ kotakAuthenticated }) {
           variant="outline"
           size="sm"
           onClick={load}
-          disabled={loading || !kotakAuthenticated}
+          disabled={loading || !anyAuthenticated}
           data-testid="refresh-positions-button"
           className="rounded-sm h-8 text-xs border-border bg-surface-1 hover:bg-surface-3"
         >
@@ -64,8 +64,8 @@ export default function PositionsTable({ kotakAuthenticated }) {
         </Button>
       </CardHeader>
       <CardContent className="p-0">
-        {!kotakAuthenticated ? (
-          <EmptyState text="Connect Kotak Neo to view open positions." />
+        {!anyAuthenticated ? (
+          <EmptyState text="Connect at least one broker to view open positions." />
         ) : positions.length === 0 ? (
           <EmptyState text={loading ? "Loading..." : "No open positions."} />
         ) : (
@@ -73,6 +73,7 @@ export default function PositionsTable({ kotakAuthenticated }) {
             <TableHeader>
               <TableRow className="border-border hover:bg-transparent">
                 <Th>Symbol</Th>
+                <Th>Broker</Th>
                 <Th className="text-right">Qty</Th>
                 <Th className="text-right">Avg Price</Th>
                 <Th className="text-right">LTP</Th>
@@ -83,12 +84,15 @@ export default function PositionsTable({ kotakAuthenticated }) {
             <TableBody>
               {positions.map((p, i) => (
                 <TableRow
-                  key={`${p.symbol}-${i}`}
+                  key={`${p.symbol}-${p.broker}-${i}`}
                   className="border-border hover:bg-surface-3"
                   data-testid="position-row"
                 >
                   <TableCell className="font-mono text-xs py-2.5 px-3">
                     {p.symbol}
+                  </TableCell>
+                  <TableCell className="text-[10px] py-2.5 px-3 uppercase tracking-wider text-muted-foreground">
+                    {brokerLabel(p.broker)}
                   </TableCell>
                   <TableCell className="font-mono text-xs py-2.5 px-3 text-right">
                     {p.quantity}
@@ -121,6 +125,13 @@ export default function PositionsTable({ kotakAuthenticated }) {
       </CardContent>
     </Card>
   );
+}
+
+function brokerLabel(b) {
+  if (b === "kotak_neo") return "Kotak";
+  if (b === "dhan") return "Dhan";
+  if (b === "alice_blue") return "Alice";
+  return b || "—";
 }
 
 function Th({ children, className = "" }) {

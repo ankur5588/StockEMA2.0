@@ -22,6 +22,7 @@ export default function AlertsConfig() {
     quantity: 1,
     exchange_segment: "nse_cm",
     product: "CNC",
+    broker: "kotak_neo",
   });
   const [busy, setBusy] = useState(false);
 
@@ -84,7 +85,7 @@ export default function AlertsConfig() {
       <CardContent className="space-y-4">
         <form
           onSubmit={add}
-          className="grid grid-cols-1 sm:grid-cols-6 gap-2"
+          className="grid grid-cols-1 sm:grid-cols-7 gap-2"
           data-testid="add-alert-form"
         >
           <div className="sm:col-span-2 space-y-1.5">
@@ -100,6 +101,27 @@ export default function AlertsConfig() {
               data-testid="alert-name-input"
               className="h-9 rounded-sm bg-surface-1 border-border font-mono text-xs"
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-semibold">
+              Broker
+            </Label>
+            <Select
+              value={form.broker}
+              onValueChange={(v) => setForm((s) => ({ ...s, broker: v }))}
+            >
+              <SelectTrigger
+                data-testid="alert-broker-select"
+                className="h-9 rounded-sm bg-surface-1 border-border text-xs"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="kotak_neo">Kotak</SelectItem>
+                <SelectItem value="dhan">Dhan</SelectItem>
+                <SelectItem value="alice_blue">Alice</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-1.5">
             <Label className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-semibold">
@@ -189,9 +211,12 @@ export default function AlertsConfig() {
                     a.enabled ? "bg-profit" : "bg-muted-foreground"
                   }`}
                 />
-                <div className="font-mono text-xs flex-1 truncate">
+                <span className="font-mono text-xs flex-1 truncate">
                   {a.alert_name}
-                </div>
+                </span>
+                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-sm border border-border bg-surface-1 text-muted-foreground uppercase tracking-wider">
+                  {a.broker === "kotak_neo" ? "Kotak" : a.broker === "dhan" ? "Dhan" : a.broker === "alice_blue" ? "Alice" : (a.broker || "—")}
+                </span>
                 <span
                   className={`font-mono text-[10px] px-2 py-0.5 rounded-sm border ${
                     a.transaction_type === "B"

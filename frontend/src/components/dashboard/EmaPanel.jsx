@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 
 export default function EmaPanel({ kotakAuthenticated }) {
+  const anyAuth = !!kotakAuthenticated; // prop name kept for compat; value is any broker auth
   const [logs, setLogs] = useState([]);
   const [running, setRunning] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -24,8 +25,8 @@ export default function EmaPanel({ kotakAuthenticated }) {
   }, [load]);
 
   const run = async () => {
-    if (!kotakAuthenticated) {
-      toast.error("Connect Kotak Neo first");
+    if (!anyAuth) {
+      toast.error("Connect at least one broker first");
       return;
     }
     setRunning(true);
@@ -67,7 +68,7 @@ export default function EmaPanel({ kotakAuthenticated }) {
         {!confirming ? (
           <Button
             onClick={() => setConfirming(true)}
-            disabled={!kotakAuthenticated || running}
+            disabled={!anyAuth || running}
             data-testid="ema-run-button"
             className="w-full h-10 rounded-sm bg-warn text-black hover:bg-warn/90 font-medium text-xs uppercase tracking-[0.12em]"
           >

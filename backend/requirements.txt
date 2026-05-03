@@ -26,3 +26,5 @@ jq>=1.6.0
 typer>=0.9.0
 emergentintegrations==0.1.0
 yfinance>=0.2.40
+dhanhq>=2.2.0
+pya3>=1.0.30

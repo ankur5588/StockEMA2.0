@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useState } from "react";
 import Header from "@/components/layout/Header";
 import LiveBanner from "@/components/layout/LiveBanner";
 import ConnectionCard from "@/components/dashboard/ConnectionCard";
+import DhanCard from "@/components/dashboard/DhanCard";
+import AliceBlueCard from "@/components/dashboard/AliceBlueCard";
 import WebhookCard from "@/components/dashboard/WebhookCard";
 import EmaPanel from "@/components/dashboard/EmaPanel";
 import AlertsConfig from "@/components/dashboard/AlertsConfig";
@@ -16,10 +18,10 @@ export default function Dashboard({ user }) {
 
   const loadStatus = useCallback(async () => {
     try {
-      const res = await api.get("/kotak/status");
+      const res = await api.get("/brokers/status");
       setStatus(res.data);
     } catch (e) {
-      setStatus({ has_credentials: false, is_authenticated: false });
+      setStatus(null);
     }
   }, []);
 
@@ -29,7 +31,19 @@ export default function Dashboard({ user }) {
     return () => clearInterval(t);
   }, [loadStatus]);
 
-  const authenticated = !!status?.is_authenticated;
+  // Wrap the Kotak-shape status so the existing Kotak card keeps working.
+  const kotakStatus = status
+    ? {
+        ...(status.kotak_neo || {}),
+        webhook_token: status.webhook_token,
+        webhook_url: status.webhook_url,
+      }
+    : null;
+
+  const anyAuth =
+    !!status?.kotak_neo?.is_authenticated ||
+    !!status?.dhan?.is_authenticated ||
+    !!status?.alice_blue?.is_authenticated;
 
   return (
     <div
@@ -40,7 +54,6 @@ export default function Dashboard({ user }) {
       <Header user={user} />
 
       <main className="max-w-[1600px] mx-auto px-6 py-6 space-y-5">
-        {/* Page title */}
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 pb-2">
           <div>
             <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-semibold">
@@ -55,36 +68,43 @@ export default function Dashboard({ user }) {
           </div>
         </div>
 
-        {/* Row 1: Connection + Webhook + EMA */}
+        {/* Brokers grid */}
+        <section data-testid="brokers-section">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-semibold mb-3">
+            / brokers
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <ConnectionCard status={kotakStatus} reload={loadStatus} />
+            <DhanCard status={status?.dhan} reload={loadStatus} />
+            <AliceBlueCard status={status?.alice_blue} reload={loadStatus} />
+          </div>
+        </section>
+
+        {/* Ops row */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <ConnectionCard status={status} reload={loadStatus} />
-          <WebhookCard status={status} />
-          <EmaPanel kotakAuthenticated={authenticated} />
+          <WebhookCard status={kotakStatus} />
+          <EmaPanel kotakAuthenticated={anyAuth} />
+          <ComplianceCard />
         </div>
 
-        {/* Row 2: Positions (span 2) + Alerts */}
+        {/* Positions + Alerts */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
-            <PositionsTable kotakAuthenticated={authenticated} />
+            <PositionsTable anyAuthenticated={anyAuth} />
           </div>
           <AlertsConfig />
         </div>
 
-        {/* Row 3: Logs */}
+        {/* Logs */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <WebhookLog />
           <TradeLog />
         </div>
 
-        {/* Row 4: Compliance */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <ComplianceCard />
-        </div>
-
         <footer className="pt-4 pb-8 text-[10px] font-mono text-muted-foreground tracking-wider flex items-center justify-between">
           <span>
-            chartink-trade · v1.0 ·{" "}
-            <span className="text-brand">emergent</span>
+            chartink-trade · v1.1 ·{" "}
+            <span className="text-brand">multi-broker</span>
           </span>
           <span>NSE / BSE · live-trading</span>
         </footer>
