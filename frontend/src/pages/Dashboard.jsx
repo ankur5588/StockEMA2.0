@@ -8,6 +8,7 @@ import AlertsConfig from "@/components/dashboard/AlertsConfig";
 import PositionsTable from "@/components/dashboard/PositionsTable";
 import TradeLog from "@/components/dashboard/TradeLog";
 import WebhookLog from "@/components/dashboard/WebhookLog";
+import ComplianceCard from "@/components/dashboard/ComplianceCard";
 import { api } from "@/lib/api";
 
 export default function Dashboard({ user }) {
@@ -73,6 +74,11 @@ export default function Dashboard({ user }) {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <WebhookLog />
           <TradeLog />
+        </div>
+
+        {/* Row 4: Compliance */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <ComplianceCard />
         </div>
 
         <footer className="pt-4 pb-8 text-[10px] font-mono text-muted-foreground tracking-wider flex items-center justify-between">

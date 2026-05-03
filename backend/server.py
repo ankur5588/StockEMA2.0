@@ -618,6 +618,77 @@ async def health():
     return {"status": "healthy", "ts": datetime.now(timezone.utc).isoformat()}
 
 
+# =============================================================================
+# DEPLOYMENT / SEBI COMPLIANCE
+# =============================================================================
+
+def _detect_platform() -> tuple[str, bool]:
+    """Return (platform_label, is_static_ip_capable)."""
+    # Emergent preview injects these via ingress, outbound IP is shared/not static
+    host = os.environ.get("HOSTNAME", "")
+    if "emergent" in os.environ.get("KUBERNETES_SERVICE_HOST", "").lower() or \
+       os.environ.get("EMERGENT_DEPLOYMENT") or host.startswith("app-"):
+        return ("Emergent preview", False)
+    if os.environ.get("STATIC_IP_DEPLOYMENT", "").lower() in ("1", "true", "yes"):
+        return (os.environ.get("DEPLOYMENT_NAME", "Self-hosted VPS"), True)
+    # Default: unknown — assume preview/dev
+    return ("Emergent preview", False)
+
+
+@api.get("/deployment/info")
+async def deployment_info():
+    """Return the current outbound IP and SEBI-compliance guidance.
+
+    The app itself cannot make the IP static — that is a property of the
+    hosting environment. Emergent preview uses pooled outbound IPs. For
+    SEBI-regulated algo trading you must self-host on a VPS with a reserved
+    static IP (DigitalOcean, AWS Elastic IP, Linode, Hetzner) and whitelist
+    that IP with Kotak Neo.
+    """
+    ip = None
+    source = None
+    services = [
+        ("https://api.ipify.org?format=json", "ip"),
+        ("https://ifconfig.me/ip", None),
+        ("https://icanhazip.com", None),
+    ]
+    for url, key in services:
+        try:
+            r = requests.get(url, timeout=3)
+            if r.status_code != 200:
+                continue
+            if key:
+                ip = r.json().get(key)
+            else:
+                ip = r.text.strip()
+            source = url
+            if ip:
+                break
+        except Exception:
+            continue
+
+    platform, is_static = _detect_platform()
+
+    return {
+        "outbound_ip": ip,
+        "ip_lookup_source": source,
+        "platform": platform,
+        "is_static_ip": is_static,
+        "sebi_compliant": is_static,
+        "guidance": (
+            "This deployment uses a POOLED outbound IP. For SEBI-regulated "
+            "algorithmic trading, self-host on a VPS with a reserved static IP "
+            "(DigitalOcean + Reserved IP, AWS + Elastic IP, Linode, Hetzner) "
+            "and set STATIC_IP_DEPLOYMENT=true in the environment."
+            if not is_static
+            else (
+                "Static-IP deployment detected. Whitelist the IP above with "
+                "Kotak Neo and register it per SEBI algo-trading requirements."
+            )
+        ),
+    }
+
+
 # Mount router
 app.include_router(api)
 

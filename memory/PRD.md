@@ -51,3 +51,13 @@ Build an application which can login into stock broker Kotak Neo, receive signal
 ## Known Limitations
 - Kotak Neo SDK pins older `requests` version which conflicts with other packages (mitigated by installing outside requirements.txt)
 - No real Kotak credentials in test environment → Kotak-dependent flows validated via 400 error paths only
+
+## Update — May 2026: SEBI / Static IP Compliance
+- Added `GET /api/deployment/info` endpoint that detects outbound IP + platform
+- Added **Compliance card** on dashboard showing outbound IP, platform, POOLED vs STATIC badge, and SEBI algo-trading notice
+- Added `STATIC_IP_DEPLOYMENT` env flag to toggle the compliance badge to green on production VPS
+- Added `/app/README.md` with full self-host instructions for a VPS with reserved static IP (DigitalOcean Reserved IP, AWS Elastic IP, Linode, Hetzner)
+
+**Clarified with user**: user has both Kotak consumer key and secret. No code change needed for credentials form.
+
+**Important**: The app CANNOT make the IP static from code. Static IP is a property of hosting infrastructure. On Emergent preview the outbound IP is pooled/shared and will eventually change. For production SEBI-regulated trading the user must deploy to a VPS with a reserved static IP per the README.
