@@ -22,6 +22,7 @@ import io
 import kotak_client
 import dhan_client
 import alice_client
+import indmoney_client
 from ema_service import compute_ema10
 from models import (
     AlertConfig,
@@ -29,6 +30,7 @@ from models import (
     AliceCredentialsInput,
     DhanCredentialsInput,
     EmaSlRun,
+    IndMoneyCredentialsInput,
     KotakCredentialsInput,
     KotakOtpInput,
     KotakStatus,

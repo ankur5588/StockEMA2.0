@@ -37,7 +37,11 @@ class AliceCredentialsInput(BaseModel):
     api_key: str
 
 
-BROKER_CHOICES = ("kotak_neo", "dhan", "alice_blue")
+class IndMoneyCredentialsInput(BaseModel):
+    access_token: str  # Bearer token from indstocks.com/app/api-trading
+
+
+BROKER_CHOICES = ("kotak_neo", "dhan", "alice_blue", "indmoney")
 
 
 class KotakStatus(BaseModel):
