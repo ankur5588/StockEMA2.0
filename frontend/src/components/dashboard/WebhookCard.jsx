@@ -80,6 +80,19 @@ export default function WebhookCard({ status }) {
                 </li>
               </ol>
             </div>
+            <div
+              className="border border-brand/30 bg-brand/5 rounded-sm p-3 space-y-1"
+              data-testid="auto-side-banner"
+            >
+              <div className="text-[10px] uppercase tracking-[0.15em] text-brand font-semibold">
+                Auto side-detection
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                If your alert name contains <span className="font-mono text-profit">BUY</span> we place a buy order.
+                If it contains <span className="font-mono text-loss">SELL</span> we place a sell order.
+                This overrides the alert config and per-symbol mapping side.
+              </p>
+            </div>
           </>
         )}
       </CardContent>

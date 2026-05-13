@@ -798,6 +798,24 @@ async def symbol_mappings_csv_template(user: User = Depends(require_user)):
 # CHARTINK WEBHOOK
 # =============================================================================
 
+def _detect_side_from_alert_name(alert_name: str) -> Optional[str]:
+    """Auto-detect transaction side from Chartink alert name.
+
+    Convention: if the alert name contains the word 'SELL' (case-insensitive)
+    we place a SELL order. If it contains 'BUY', a BUY order. Otherwise
+    return None and let downstream config decide. SELL is checked first because
+    it's more specific (some alerts say things like 'BUY THE DIP, SELL ON RISE').
+    """
+    if not alert_name:
+        return None
+    n = alert_name.upper()
+    if "SELL" in n:
+        return "S"
+    if "BUY" in n:
+        return "B"
+    return None
+
+
 @api.post("/webhooks/chartink/{token}")
 async def chartink_webhook(token: str, request: Request):
     payload = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
@@ -851,6 +869,8 @@ async def chartink_webhook(token: str, request: Request):
         result_notes.append(f"No enabled config for alert '{alert_name}' - logged only.")
     else:
         broker = cfg_doc.get("broker", "kotak_neo")
+        # Alert-name auto-detection wins over both alert-config and mapping side
+        alert_name_side = _detect_side_from_alert_name(alert_name)
         for idx, sym in enumerate(stocks):
             price = prices[idx] if idx < len(prices) else None
 
@@ -872,6 +892,11 @@ async def chartink_webhook(token: str, request: Request):
                 if mapping.get("product"):
                     order_product = mapping["product"]
                 mapping_note = f" (mapped: {sym}→{order_symbol}, qty={order_qty})"
+
+            # Alert name BUY/SELL keyword wins last (highest priority)
+            if alert_name_side:
+                order_txn = alert_name_side
+                mapping_note += f" [auto-side from name: {'BUY' if alert_name_side == 'B' else 'SELL'}]"
 
             status, order_id, msg = _route_order(
                 user_id=user_id,
