@@ -63,6 +63,22 @@ class AlertConfigInput(BaseModel):
     broker: str = "kotak_neo"  # which broker to route to
 
 
+class SymbolMappingInput(BaseModel):
+    chartink_symbol: str  # the symbol name as Chartink sends it
+    nse_symbol: str       # the NSE trading symbol (used for the order)
+    quantity: Optional[int] = None     # fixed qty (takes precedence over amount)
+    amount: Optional[float] = None     # rupee value → qty = floor(amount / trigger_price)
+    broker: str = "*"     # "*" = any broker; specific broker overrides "*"
+    transaction_type: Optional[str] = None  # B / S (overrides alert config if set)
+    product: Optional[str] = None           # CNC / MIS / NRML (overrides if set)
+
+
+class SymbolMapping(SymbolMappingInput):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    created_at: datetime = Field(default_factory=_now)
+
+
 class AlertConfig(AlertConfigInput):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str

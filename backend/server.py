@@ -12,10 +12,12 @@ from typing import Optional, List
 import requests
 from dotenv import load_dotenv
 from fastapi import APIRouter, Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
+
+import csv
+import io
 
 import kotak_client
 import dhan_client
@@ -30,6 +32,8 @@ from models import (
     KotakCredentialsInput,
     KotakOtpInput,
     KotakStatus,
+    SymbolMapping,
+    SymbolMappingInput,
     TradeLog,
     User,
     WebhookLog,
@@ -623,6 +627,174 @@ async def delete_alert(alert_id: str, user: User = Depends(require_user)):
 
 
 # =============================================================================
+# SYMBOL MAPPINGS (Chartink symbol -> NSE symbol with per-symbol qty/amount)
+# =============================================================================
+
+CSV_COLUMNS = ["chartink_symbol", "nse_symbol", "quantity", "amount",
+               "broker", "transaction_type", "product"]
+
+
+async def _resolve_mapping(user_id: str, chartink_symbol: str, broker: str):
+    """Find best matching symbol mapping for (chartink_symbol, broker).
+    Prefer exact broker match over '*' wildcard.
+    """
+    sym = chartink_symbol.upper().strip()
+    cursor = db.symbol_mappings.find(
+        {"user_id": user_id, "chartink_symbol": sym, "broker": {"$in": [broker, "*"]}},
+        {"_id": 0},
+    )
+    docs = [d async for d in cursor]
+    if not docs:
+        return None
+    # Exact broker match wins over "*"
+    docs.sort(key=lambda d: 0 if d.get("broker") == broker else 1)
+    return docs[0]
+
+
+@api.get("/symbol-mappings")
+async def list_symbol_mappings(user: User = Depends(require_user)):
+    cur = db.symbol_mappings.find({"user_id": user.user_id}, {"_id": 0}).sort("chartink_symbol", 1)
+    return {"mappings": [c async for c in cur]}
+
+
+@api.post("/symbol-mappings")
+async def create_symbol_mapping(payload: SymbolMappingInput, user: User = Depends(require_user)):
+    mapping = SymbolMapping(
+        user_id=user.user_id,
+        **payload.model_dump(),
+        chartink_symbol=payload.chartink_symbol.upper().strip(),
+        nse_symbol=payload.nse_symbol.upper().strip(),
+    )
+    doc = mapping.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+    # Replace any existing mapping with the same (chartink_symbol, broker) pair
+    await db.symbol_mappings.delete_many({
+        "user_id": user.user_id,
+        "chartink_symbol": mapping.chartink_symbol,
+        "broker": mapping.broker,
+    })
+    await db.symbol_mappings.insert_one(doc)
+    return mapping
+
+
+@api.delete("/symbol-mappings/{mapping_id}")
+async def delete_symbol_mapping(mapping_id: str, user: User = Depends(require_user)):
+    await db.symbol_mappings.delete_one({"id": mapping_id, "user_id": user.user_id})
+    return {"ok": True}
+
+
+@api.delete("/symbol-mappings")
+async def clear_symbol_mappings(user: User = Depends(require_user)):
+    res = await db.symbol_mappings.delete_many({"user_id": user.user_id})
+    return {"ok": True, "deleted": res.deleted_count}
+
+
+@api.post("/symbol-mappings/upload")
+async def upload_symbol_mappings_csv(request: Request, user: User = Depends(require_user)):
+    """Accept a CSV with columns: chartink_symbol, nse_symbol, quantity, amount,
+    broker, transaction_type, product.  Either quantity OR amount must be set.
+    broker = '*' applies to all brokers.
+    Replaces existing rows for matching (chartink_symbol, broker) pairs.
+    """
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty body")
+    try:
+        text = body.decode("utf-8-sig")
+    except Exception:
+        raise HTTPException(status_code=400, detail="CSV must be UTF-8")
+
+    reader = csv.DictReader(io.StringIO(text))
+    rows: List[dict] = []
+    errors: List[str] = []
+    line = 1
+    for raw in reader:
+        line += 1
+        if not raw:
+            continue
+        # Normalise key names (allow different cases)
+        row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items() if k}
+        ck = row.get("chartink_symbol") or row.get("chartink") or row.get("symbol")
+        ns = row.get("nse_symbol") or row.get("nse") or row.get("trading_symbol")
+        if not ck or not ns:
+            errors.append(f"line {line}: chartink_symbol and nse_symbol are required")
+            continue
+        qty_raw = row.get("quantity") or row.get("qty") or ""
+        amt_raw = row.get("amount") or row.get("amt") or ""
+        broker = (row.get("broker") or "*").lower() or "*"
+        if broker not in ("kotak_neo", "dhan", "alice_blue", "*"):
+            errors.append(f"line {line}: invalid broker '{broker}'")
+            continue
+        try:
+            qty = int(qty_raw) if qty_raw else None
+        except ValueError:
+            errors.append(f"line {line}: quantity must be integer")
+            continue
+        try:
+            amt = float(amt_raw) if amt_raw else None
+        except ValueError:
+            errors.append(f"line {line}: amount must be number")
+            continue
+        if not qty and not amt:
+            errors.append(f"line {line}: provide quantity OR amount")
+            continue
+        txn = (row.get("transaction_type") or row.get("side") or "").upper()[:1] or None
+        if txn and txn not in ("B", "S"):
+            errors.append(f"line {line}: transaction_type must be B or S")
+            continue
+        prod = (row.get("product") or "").upper() or None
+        if prod and prod not in ("CNC", "MIS", "NRML"):
+            errors.append(f"line {line}: product must be CNC / MIS / NRML")
+            continue
+        rows.append({
+            "id": str(uuid.uuid4()),
+            "user_id": user.user_id,
+            "chartink_symbol": ck.upper(),
+            "nse_symbol": ns.upper(),
+            "quantity": qty,
+            "amount": amt,
+            "broker": broker,
+            "transaction_type": txn,
+            "product": prod,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    if errors and not rows:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+
+    inserted = 0
+    replaced = 0
+    for r in rows:
+        existing = await db.symbol_mappings.find_one(
+            {"user_id": user.user_id, "chartink_symbol": r["chartink_symbol"], "broker": r["broker"]},
+            {"_id": 0},
+        )
+        if existing:
+            await db.symbol_mappings.delete_many({
+                "user_id": user.user_id,
+                "chartink_symbol": r["chartink_symbol"],
+                "broker": r["broker"],
+            })
+            replaced += 1
+        await db.symbol_mappings.insert_one(r)
+        inserted += 1
+    return {"ok": True, "inserted": inserted, "replaced": replaced, "errors": errors}
+
+
+@api.get("/symbol-mappings/csv-template")
+async def symbol_mappings_csv_template(user: User = Depends(require_user)):
+    """Return a sample CSV that users can download as a starting point."""
+    sample = (
+        ",".join(CSV_COLUMNS) + "\n"
+        "RELIANCE,RELIANCE-EQ,1,,kotak_neo,B,CNC\n"
+        "TCS,TCS,,5000,dhan,B,CNC\n"
+        "INFY,INFY,5,,*,B,CNC\n"
+    )
+    return Response(content=sample, media_type="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=symbol_mappings_template.csv"})
+
+
+# =============================================================================
 # CHARTINK WEBHOOK
 # =============================================================================
 
@@ -681,33 +853,53 @@ async def chartink_webhook(token: str, request: Request):
         broker = cfg_doc.get("broker", "kotak_neo")
         for idx, sym in enumerate(stocks):
             price = prices[idx] if idx < len(prices) else None
+
+            # Consult symbol mappings (per-symbol overrides on top of alert config)
+            mapping = await _resolve_mapping(user_id, sym, broker)
+            order_symbol = sym
+            order_qty = int(cfg_doc["quantity"])
+            order_txn = cfg_doc["transaction_type"]
+            order_product = cfg_doc.get("product", "CNC")
+            mapping_note = ""
+            if mapping:
+                order_symbol = mapping.get("nse_symbol") or sym
+                if mapping.get("quantity"):
+                    order_qty = int(mapping["quantity"])
+                elif mapping.get("amount") and price and price > 0:
+                    order_qty = max(1, int(mapping["amount"] // price))
+                if mapping.get("transaction_type"):
+                    order_txn = mapping["transaction_type"]
+                if mapping.get("product"):
+                    order_product = mapping["product"]
+                mapping_note = f" (mapped: {sym}→{order_symbol}, qty={order_qty})"
+
             status, order_id, msg = _route_order(
                 user_id=user_id,
                 broker=broker,
-                symbol=sym,
-                transaction_type=cfg_doc["transaction_type"],
-                quantity=int(cfg_doc["quantity"]),
-                product=cfg_doc.get("product", "CNC"),
+                symbol=order_symbol,
+                transaction_type=order_txn,
+                quantity=order_qty,
+                product=order_product,
                 exchange_segment=cfg_doc.get("exchange_segment", "nse_cm"),
             )
             if status == "success":
                 placed_any = True
             tl = TradeLog(
                 user_id=user_id,
-                symbol=sym,
-                quantity=int(cfg_doc["quantity"]),
+                symbol=order_symbol,
+                quantity=order_qty,
                 price=price,
-                transaction_type=cfg_doc["transaction_type"],
+                transaction_type=order_txn,
                 order_type="MKT",
                 order_id=order_id,
                 status=status,
-                message=f"[{broker}] {msg}",
+                message=f"[{broker}] {msg}{mapping_note}",
                 source="chartink",
             )
             tdoc = tl.model_dump()
             tdoc["created_at"] = tdoc["created_at"].isoformat()
             await db.trade_logs.insert_one(tdoc)
-            result_notes.append(f"{sym} [{broker}]: {status} - {msg}")
+            result_notes.append(f"{order_symbol} [{broker}]: {status} - {msg}{mapping_note}")
 
     wlog.processed = True
     wlog.result_note = " | ".join(result_notes) if result_notes else None

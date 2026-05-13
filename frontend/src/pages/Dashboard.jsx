@@ -11,6 +11,7 @@ import PositionsTable from "@/components/dashboard/PositionsTable";
 import TradeLog from "@/components/dashboard/TradeLog";
 import WebhookLog from "@/components/dashboard/WebhookLog";
 import ComplianceCard from "@/components/dashboard/ComplianceCard";
+import SymbolMappings from "@/components/dashboard/SymbolMappings";
 import { api } from "@/lib/api";
 
 export default function Dashboard({ user }) {
@@ -94,6 +95,9 @@ export default function Dashboard({ user }) {
           </div>
           <AlertsConfig />
         </div>
+
+        {/* Symbol Mappings (full-width) */}
+        <SymbolMappings />
 
         {/* Logs */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
