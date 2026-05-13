@@ -10,6 +10,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Check, X, AlertTriangle, FlaskConical } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 
@@ -22,9 +23,38 @@ export default function KotakSetupDialog({ open, onOpenChange, reload }) {
     consumer_secret: "",
   });
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [oauthResult, setOauthResult] = useState(null);
 
   const set = (k) => (e) =>
     setForm((s) => ({ ...s, [k]: e.target.value }));
+
+  const testOauth = async () => {
+    if (!form.consumer_key.trim() || !form.consumer_secret.trim()) {
+      toast.error("Enter consumer_key and consumer_secret first");
+      return;
+    }
+    setTesting(true);
+    setOauthResult(null);
+    try {
+      const res = await api.post("/kotak/test-oauth", {
+        consumer_key: form.consumer_key,
+        consumer_secret: form.consumer_secret,
+        environment: "prod",
+      });
+      setOauthResult(res.data);
+      if (res.data.ok) {
+        toast.success("Kotak accepted your key/secret");
+      } else {
+        toast.error("Kotak rejected — see details below");
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Test failed");
+      setOauthResult({ ok: false, message: err?.response?.data?.detail || "Test failed" });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -112,6 +142,62 @@ export default function KotakSetupDialog({ open, onOpenChange, reload }) {
             onChange={set("consumer_secret")}
             testid="kotak-csecret-input"
           />
+
+          <Button
+            type="button"
+            variant="outline"
+            onClick={testOauth}
+            disabled={testing || !form.consumer_key.trim() || !form.consumer_secret.trim()}
+            data-testid="test-oauth-button"
+            className="w-full rounded-sm h-9 text-xs border-border bg-surface-1 hover:bg-surface-3"
+          >
+            <FlaskConical className="w-3.5 h-3.5 mr-1.5" />
+            {testing ? "Calling Kotak OAuth..." : "Test key + secret only (no OTP)"}
+          </Button>
+
+          {oauthResult && (
+            <div
+              className={`border rounded-sm p-3 space-y-1.5 ${
+                oauthResult.ok
+                  ? "border-profit/40 bg-profit/5"
+                  : "border-loss/40 bg-loss/5"
+              }`}
+              data-testid="oauth-test-result"
+            >
+              <div className="flex items-center gap-2">
+                {oauthResult.ok ? (
+                  <Check className="w-3.5 h-3.5 text-profit" />
+                ) : (
+                  <X className="w-3.5 h-3.5 text-loss" />
+                )}
+                <span
+                  className={`text-[10px] uppercase tracking-[0.15em] font-semibold ${
+                    oauthResult.ok ? "text-profit" : "text-loss"
+                  }`}
+                >
+                  {oauthResult.ok ? "credentials valid" : "kotak rejected"}
+                </span>
+                {oauthResult.http_status > 0 && (
+                  <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                    HTTP {oauthResult.http_status}
+                  </span>
+                )}
+              </div>
+              <div className="font-mono text-[11px] text-muted-foreground break-words">
+                {oauthResult.message}
+              </div>
+              {!oauthResult.ok && (
+                <div className="text-[10px] text-muted-foreground pt-1 border-t border-border flex items-start gap-1.5">
+                  <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+                  <span>
+                    Check on Kotak Neo dashboard: (1) app status ACTIVE,
+                    (2) keys are the latest pair (regen invalidates old),
+                    (3) Trade API not Data API, (4) no trailing spaces.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
           <DialogFooter className="pt-3">
             <Button
               type="button"

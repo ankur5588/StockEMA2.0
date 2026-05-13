@@ -11,8 +11,11 @@ backend worker; for multi-worker deployments the login flow must be redone on
 a different worker (acceptable trade-off for MVP).
 """
 from __future__ import annotations
+import base64
 import logging
 from typing import Dict, Any, Optional
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,13 @@ try:
 except Exception as e:  # pragma: no cover
     NeoAPI = None
     logger.warning("neo_api_client not importable: %s", e)
+
+
+# OAuth endpoints (extracted from SDK to allow direct validation)
+_OAUTH_URLS = {
+    "prod": "https://napi.kotaksecurities.com/oauth2/token",
+    "uat": "https://nsbxapi.kotaksecurities.com/oauth2/token",
+}
 
 
 # in-memory session cache { user_id: {"client": NeoAPI, "ucc": str} }
@@ -34,6 +44,73 @@ class KotakError(Exception):
 def _ensure_sdk():
     if NeoAPI is None:
         raise KotakError("Kotak Neo SDK not available in this environment")
+
+
+def test_oauth(consumer_key: str, consumer_secret: str, environment: str = "prod") -> dict:
+    """Call Kotak's OAuth /token endpoint directly with Basic auth and surface
+    the EXACT response. Lets users debug their key/secret before triggering the
+    full login + OTP flow.
+
+    Returns:
+      {
+        "ok": bool,
+        "http_status": int,
+        "body": dict | str,                # parsed json or raw text
+        "message": str,                    # human-readable summary
+        "url": str                         # endpoint hit
+      }
+    """
+    consumer_key = (consumer_key or "").strip()
+    consumer_secret = (consumer_secret or "").strip()
+    env = (environment or "prod").lower()
+    if env not in _OAUTH_URLS:
+        env = "prod"
+    url = _OAUTH_URLS[env]
+
+    if not consumer_key or not consumer_secret:
+        return {"ok": False, "http_status": 0, "body": None,
+                "message": "consumer_key and consumer_secret are required",
+                "url": url}
+
+    basic = base64.b64encode(f"{consumer_key}:{consumer_secret}".encode()).decode()
+    try:
+        resp = requests.post(
+            url,
+            headers={
+                "Authorization": f"Basic {basic}",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            data={"grant_type": "client_credentials"},
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        return {"ok": False, "http_status": 0, "body": None,
+                "message": f"Network error reaching Kotak: {e}", "url": url}
+
+    try:
+        body = resp.json()
+    except Exception:
+        body = resp.text
+
+    if resp.ok and isinstance(body, dict) and body.get("access_token"):
+        return {"ok": True, "http_status": resp.status_code, "body": body,
+                "message": "OAuth handshake succeeded — credentials are valid.",
+                "url": url}
+
+    # Build a helpful human message from common Kotak error shapes
+    summary = f"HTTP {resp.status_code}"
+    if isinstance(body, dict):
+        msg = body.get("error_description") or body.get("Message") or \
+              body.get("error") or body.get("message") or ""
+        if msg:
+            summary = f"{summary} — {msg}"
+        if isinstance(body.get("fault"), dict):
+            summary = f"{summary} — {body['fault'].get('faultstring', '')}"
+    elif isinstance(body, str) and body:
+        summary = f"{summary} — {body[:200]}"
+
+    return {"ok": False, "http_status": resp.status_code, "body": body,
+            "message": summary, "url": url}
 
 
 def _strip_creds(creds: dict) -> dict:
@@ -65,6 +142,21 @@ def start_login(user_id: str, creds: dict) -> dict:
     if not creds["mobile"].startswith("+"):
         raise KotakError(
             "Mobile number must start with country code (e.g. +91XXXXXXXXXX)"
+        )
+
+    # Validate OAuth credentials directly first so we can surface the EXACT
+    # Kotak error (the SDK swallows the response and crashes downstream).
+    env = (creds.get("environment") or "prod").lower()
+    oauth = test_oauth(creds["consumer_key"], creds["consumer_secret"], env)
+    if not oauth["ok"]:
+        raise KotakError(
+            f"Kotak OAuth rejected your credentials. {oauth['message']}. "
+            f"Endpoint: {oauth['url']}. "
+            "Re-check Kotak Neo app → Profile → Trade API → API Dashboard: "
+            "(1) app status = ACTIVE, "
+            "(2) you copied the latest key+secret pair (regen invalidates old ones), "
+            "(3) you are using TRADE API keys not Data API, "
+            "(4) no trailing spaces."
         )
 
     try:

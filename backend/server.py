@@ -268,6 +268,27 @@ async def kotak_status(request: Request, user: User = Depends(require_user)):
     )
 
 
+@api.post("/kotak/test-oauth")
+async def kotak_test_oauth(payload: dict, user: User = Depends(require_user)):
+    """Validate JUST the consumer_key + consumer_secret pair against Kotak's
+    OAuth endpoint without triggering a full login + OTP flow. Returns the
+    exact Kotak response so users can debug app activation / wrong key issues.
+    """
+    ck = (payload.get("consumer_key") or "").strip()
+    cs = (payload.get("consumer_secret") or "").strip()
+    env = (payload.get("environment") or "prod").lower()
+    if not ck or not cs:
+        # Fall back to saved credentials
+        doc = await _get_creds_doc(user.user_id)
+        if not doc:
+            raise HTTPException(status_code=400, detail="Provide consumer_key + consumer_secret or save credentials first")
+        saved = decrypt_dict(doc["encrypted"])
+        ck = ck or saved["consumer_key"]
+        cs = cs or saved["consumer_secret"]
+        env = env or (saved.get("environment") or "prod")
+    return kotak_client.test_oauth(ck, cs, env)
+
+
 @api.post("/kotak/login")
 async def kotak_login(user: User = Depends(require_user)):
     doc = await _get_creds_doc(user.user_id)
