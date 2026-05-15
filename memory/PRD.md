@@ -1,79 +1,75 @@
-# ChartinkTrade — Product Requirements Document
+# ChartinkTrade — PRD
 
-## Problem Statement
-Build an application which can login into stock broker Kotak Neo, receive signals from Chartink via webhook, place orders automatically, compute EMA10 on open positions, and place EMA10-based stoploss orders.
+## Original problem statement
+Build an application which can log into a stock broker like Kotak Neo, receive
+signals from Chartink, place the order, compute EMA10, and place a stoploss
+order. Must support multiple brokers and SEBI Static IP algo-trading rules.
 
-## User Choices (captured)
-- Broker: **Kotak Neo API** (via `neo_api_client` SDK)
-- Signals: **Chartink Webhook** (inbound POST)
-- Auth: **Emergent Google Social Login**
-- EMA10 rule: **Pull open positions daily → compute daily EMA10 → place SL order**
+## Personas
+- Retail Indian trader using Chartink + a broker (Kotak Neo, Dhan, Alice Blue)
+- Trader requiring SEBI-compliant static IP for algo trading
 
-## Architecture
-- Backend: FastAPI + MongoDB (motor)
-- Frontend: React + Tailwind + shadcn/ui
-- Encryption: Fernet (cryptography) for stored Kotak credentials
-- Market data: yfinance (NSE/BSE daily candles for EMA10)
+## Core requirements
+1. Multi-user web app with auth (Google + email/password)
+2. Connect multiple stock brokers: Kotak Neo, Dhan, Alice Blue (INDmoney scaffolded)
+3. Receive Chartink webhooks → route to the user's chosen broker
+4. Daily EMA10 calculation → place stoploss for open long positions
+5. SEBI Static IP guidance + one-click VPS deployment script
+6. CSV bulk upload for Chartink-symbol → NSE-symbol mapping (qty OR amount)
+7. Auto-detect BUY/SELL from Chartink alert name
+8. Manual order placement with AMO + auto EMA10 stoploss
 
-## Core Modules Implemented (May 2026)
-1. **Auth (Emergent Google)** — `/api/auth/session`, `/api/auth/me`, `/api/auth/logout` + httpOnly cookie + Bearer fallback
-2. **Kotak credentials vault** — `POST/DELETE /api/kotak/credentials` (Fernet-encrypted, per-user), `GET /api/kotak/status`
-3. **Kotak 2-step login** — `POST /api/kotak/login` → OTP challenge, `POST /api/kotak/verify-otp` → session in memory
-4. **Positions** — `GET /api/kotak/positions`, `GET /api/kotak/holdings` (normalised shape)
-5. **Alert configs CRUD** — `GET/POST/DELETE /api/alerts` (alert_name, side, qty, product, segment)
-6. **Chartink webhook** — `POST /api/webhooks/chartink/{token}` (public, token-scoped). Accepts JSON + form-urlencoded. Matches alert_name → config → places MKT order via Kotak
-7. **EMA10 stoploss run** — `POST /api/ema-sl/run` pulls positions, yfinance daily EMA10, places SL order at EMA10 trigger
-8. **Logs** — `GET /api/webhooks/logs`, `/api/trades/logs`, `/api/ema-sl/logs`
+## What has been implemented (latest = top)
 
-## Frontend
-- Login page (split-screen, Emergent Google button)
-- Dashboard: Connection (Kotak status + login/setup dialogs), Webhook URL card (copy), EMA10 Stoploss panel (confirm-then-run), Positions table, Alert Configs, Webhook feed, Trade log
-- Live Trading warning banner (amber)
-- Dark terminal aesthetic (JetBrains Mono for numbers, IBM Plex Sans for UI)
+### 2026-05-15 — Manual Order + EMA10 SL + bug fix
+- Bug fix: `POST /api/symbol-mappings` no longer throws `TypeError` (duplicate kwarg).
+- New endpoint `POST /api/orders/manual` — broker, symbol, side, qty, order_type
+  (MKT/L), price, product (CNC/MIS/NRML), exchange, **AMO** toggle,
+  **auto_ema_sl** toggle (BUY only).
+- New endpoint `GET /api/ema-preview/{symbol}` — returns EMA10 + SL trigger/limit.
+- AMO support added to `kotak_client.place_order`, `dhan_client.place_order`,
+  `alice_client.place_order`.
+- Frontend `ManualOrderCard.jsx` — full form, broker dropdown shows online/offline
+  state, Preview-EMA10 button, AMO toggle, Auto-SL toggle (auto-disabled for SELL).
+- 16 backend tests in `/app/backend/tests/test_manual_order_and_mappings.py` — 100% pass.
 
-## Test Status (as of May 2026)
-- Backend: **18/18 passing** via pytest (`/app/backend/tests/backend_test.py`)
-- Frontend: manual smoke tested via screenshots (login & dashboard render correctly)
+### 2026-05-15 — Email/Password Auth
+- `auth_service.py` with bcrypt + JWT (7-day token), brute-force lockout
+  (5 attempts → 15 min), `users.email` unique index, `login_attempts` index.
+- New endpoints: `POST /api/auth/register`, `POST /api/auth/login`.
+- Login.jsx redesigned with Sign in / Sign up tabs + Google fallback button.
+- Admin seeded on startup: `admin@chartink.local / admin123`.
 
-## Backlog
-### P1 — Next features
-- Scheduled cron for daily EMA10 SL run (currently manual only)
-- Store Kotak session token in Mongo so login survives backend restart (currently in-memory)
-- Live quote streaming via Kotak Neo websocket for positions table LTP/PnL
-- Per-alert filters: max daily trades, cooldown, position sizing
+### Pre-existing
+- Emergent Google OAuth (Strict-Mode race fix + Bearer token fallback).
+- Kotak Neo, Dhan, Alice Blue broker clients (live order + positions).
+- Chartink webhook ingress with symbol mapping + auto BUY/SELL detect.
+- CSV upload for symbol mappings.
+- Daily EMA10 SL run across all connected brokers.
+- VPS deploy script + SEBI static IP compliance card.
 
-### P2 — Nice to have
-- Chartink webhook signature verification
-- Multi-worker deployment support for sessions
-- Export trade logs CSV
-- Dry-run / paper-trade toggle
+## Backlog / Roadmap
 
-## Known Limitations
-- Kotak Neo SDK pins older `requests` version which conflicts with other packages (mitigated by installing outside requirements.txt)
-- No real Kotak credentials in test environment → Kotak-dependent flows validated via 400 error paths only
+### 🔴 P0
+- Finish INDmoney broker integration (frontend card + brokers/status hook
+  + webhook router + EMA SL + AlertsConfig dropdown).
 
-## Update — May 2026: SEBI / Static IP Compliance
-- Added `GET /api/deployment/info` endpoint that detects outbound IP + platform
-- Added **Compliance card** on dashboard showing outbound IP, platform, POOLED vs STATIC badge, and SEBI algo-trading notice
-- Added `STATIC_IP_DEPLOYMENT` env flag to toggle the compliance badge to green on production VPS
-- Added `/app/README.md` with full self-host instructions for a VPS with reserved static IP (DigitalOcean Reserved IP, AWS Elastic IP, Linode, Hetzner)
+### 🟡 P1
+- Cron / APScheduler for automatic daily EMA10 run.
+- Dhan token auto-refresh / unlimited token registration UI.
+- Auto-detect Intraday (MIS) vs Delivery (CNC) from Chartink alert names.
+- Defensive backend check: reject `order_type='L'` when `price<=0` (currently FE-only).
+- Add `require_user` dependency to `/api/ema-preview/{symbol}` for consistency.
 
-**Clarified with user**: user has both Kotak consumer key and secret. No code change needed for credentials form.
+### 🟢 P2
+- "Test webhook" button on dashboard for 1-click pipeline verification.
+- MongoDB → S3 daily backup for trade logs & configs.
+- Forgot-password / password-reset flow (already scaffolded in playbook).
+- Refactor `server.py` (~1450 lines) into `routers/{auth,brokers,webhooks,
+  ema_sl,orders,symbol_mappings}.py`.
 
-**Important**: The app CANNOT make the IP static from code. Static IP is a property of hosting infrastructure. On Emergent preview the outbound IP is pooled/shared and will eventually change. For production SEBI-regulated trading the user must deploy to a VPS with a reserved static IP per the README.
-
-## Update — May 2026: Multi-broker support (Dhan + Alice Blue)
-- Added **DhanHQ** integration (`dhanhq` v2.2 SDK, uses `DhanContext` wrapper). Flow: save client_id + access_token → connect → place orders / fetch positions
-- Added **Alice Blue ANT API** integration (`pya3` SDK). Flow: save user_id + api_key → connect (SHA256 session handshake) → orders
-- New collections: `dhan_credentials`, `alice_credentials`, `user_webhooks`
-- Alert config now has `broker` field (kotak_neo | dhan | alice_blue)
-- Chartink webhook router picks broker per-alert
-- EMA10 stoploss now iterates across all authenticated brokers
-- New endpoint `GET /api/brokers/status` returns unified state + user-level webhook URL
-- New endpoint `GET /api/positions/all` aggregates positions across all authenticated brokers
-- Frontend: 3 broker cards in one row (Kotak, Dhan, Alice Blue), alert form has broker dropdown, positions table shows broker column
-
-Test status: 26/26 new multi-broker backend tests passing (100%). Existing Kotak + auth + webhook + logs tests also passing from iteration 1.
-
-## Kotak login fix
-Root cause was Kotak's OAuth rejecting user's consumer_key/secret (HTTP 401). Our error messages now clearly guide the user to: activate the app, use Trade API keys (not Data API), remove whitespace, regenerate the key+secret pair. User needs to resolve on Kotak's dashboard side - code is correct.
+## Tech stack
+- Backend: FastAPI, Motor (async MongoDB), bcrypt, PyJWT, yfinance, pandas,
+  kotak-neo-api, dhanhq, pya3 (Alice Blue), Fernet.
+- Frontend: React 19 + Vite-style CRA, axios, shadcn/ui, lucide-react, sonner.
+- Hosting: SEBI-compliant VPS (`deploy.sh` script). Preview env via Emergent.
