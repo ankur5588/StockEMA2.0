@@ -65,3 +65,12 @@ jobs:
               "$SRC_DIR"/ "$APP_DIR"/
             sudo chmod +x "$APP_DIR/deploy.sh"
             printf 'y\n' | sudo "$APP_DIR/deploy.sh" "$DOMAIN" "$CONTACT_EMAIL"
+
+            MONGO_APP_PWD="$(sudo cat /root/.chartink_mongo_app_pwd)"
+            MONGO_APP_PWD_ENC="$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote_plus(sys.argv[1]))" "$MONGO_APP_PWD")"
+            sudo sed -i "s|^MONGO_URL=.*|MONGO_URL=mongodb://chartink:${MONGO_APP_PWD_ENC}@127.0.0.1:27017/chartink_trade_prod?authSource=chartink_trade_prod|" "$APP_DIR/backend/.env"
+            sudo systemctl restart chartink-backend
+
+            curl -fsS --retry 10 --retry-delay 3 http://127.0.0.1:8001/api/health >/dev/null
+            curl -fsS --retry 10 --retry-delay 3 "https://$DOMAIN/api/health" >/dev/null
+            echo "Deployment and health checks completed successfully."
