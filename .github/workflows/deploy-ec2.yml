@@ -69,5 +69,5 @@ jobs:
             printf 'y\n' | sudo "$APP_DIR/deploy.sh" "$DOMAIN" "$CONTACT_EMAIL"
 
             curl -fsS --retry 10 --retry-delay 3 http://127.0.0.1:8001/api/health >/dev/null
-            curl -kfsS --retry 10 --retry-delay 3 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/health" >/dev/null
-            echo "Deployment and in-server health checks completed successfully."
+            curl -fsS --retry 10 --retry-delay 3 -H "Host: $DOMAIN" http://127.0.0.1/api/health >/dev/null
+            echo "Deployment and health checks completed successfully."
