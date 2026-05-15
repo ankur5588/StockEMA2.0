@@ -1,0 +1,186 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-ec2-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Upload source bundle to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "."
+          target: "/tmp/chartink-release"
+          overwrite: true
+          rm: true
+
+      - name: Provision and deploy on EC2
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DOMAIN: ${{ secrets.APP_DOMAIN }}
+          CONTACT_EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
+          FERNET_KEY: ${{ secrets.FERNET_KEY }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: DOMAIN,CONTACT_EMAIL,FERNET_KEY
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            APP_DIR="/opt/chartink-trade"
+            SRC_DIR="/tmp/chartink-release"
+            APP_USER="chartink"
+            DB_NAME="chartink_trade_prod"
+
+            if [ -z "${DOMAIN:-}" ]; then
+              echo "APP_DOMAIN secret is required"
+              exit 1
+            fi
+            if [ -z "${CONTACT_EMAIL:-}" ]; then
+              echo "LETSENCRYPT_EMAIL secret is required"
+              exit 1
+            fi
+
+            export DEBIAN_FRONTEND=noninteractive
+            sudo apt-get update -qq
+            sudo apt-get install -yq git curl ca-certificates gnupg ufw nginx certbot python3-certbot-nginx rsync mongodb python3.11 python3.11-venv python3-pip
+
+            if ! node -v 2>/dev/null | grep -q '^v20\.'; then
+              curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+              sudo apt-get install -yq nodejs
+            fi
+            if ! command -v yarn >/dev/null 2>&1; then
+              sudo npm install -g yarn
+            fi
+
+            if ! id -u "$APP_USER" >/dev/null 2>&1; then
+              sudo useradd -r -m -d "/home/$APP_USER" -s /bin/bash "$APP_USER"
+            fi
+
+            sudo mkdir -p "$APP_DIR"
+            sudo rsync -a --delete \
+              --exclude ".git" \
+              --exclude "frontend/node_modules" \
+              --exclude "backend/.venv" \
+              "$SRC_DIR"/ "$APP_DIR"/
+            sudo chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+
+            if [ -z "${FERNET_KEY:-}" ]; then
+              FERNET_KEY="$(sudo -u "$APP_USER" python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+            fi
+
+            cat <<EOF | sudo tee "$APP_DIR/backend/.env" >/dev/null
+            MONGO_URL=mongodb://127.0.0.1:27017
+            DB_NAME=$DB_NAME
+            CORS_ORIGINS=https://$DOMAIN,https://www.$DOMAIN
+            FERNET_KEY=$FERNET_KEY
+            STATIC_IP_DEPLOYMENT=true
+            DEPLOYMENT_NAME=$DOMAIN
+            EOF
+            sudo chown "$APP_USER:$APP_USER" "$APP_DIR/backend/.env"
+            sudo chmod 600 "$APP_DIR/backend/.env"
+
+            cat <<EOF | sudo tee "$APP_DIR/frontend/.env" >/dev/null
+            REACT_APP_BACKEND_URL=https://$DOMAIN
+            EOF
+            sudo chown "$APP_USER:$APP_USER" "$APP_DIR/frontend/.env"
+
+            sudo -u "$APP_USER" bash -lc "
+              cd '$APP_DIR/backend'
+              sed -i '/emergentintegrations==0.1.0/d' requirements.txt || true
+              python3.11 -m venv .venv
+              source .venv/bin/activate
+              pip install --upgrade pip
+              pip install -r requirements.txt
+              pip install 'git+https://github.com/Kotak-Neo/Kotak-neo-api-v2.git@v2.0.1#egg=neo_api_client'
+              pip install --upgrade 'motor==3.7.1' 'websockets>=13.0' 'certifi>=2024.2.2'
+            "
+
+            sudo -u "$APP_USER" bash -lc "
+              cd '$APP_DIR/frontend'
+              yarn install --frozen-lockfile || yarn install
+              yarn build
+            "
+
+            cat <<EOF | sudo tee /etc/systemd/system/chartink-backend.service >/dev/null
+            [Unit]
+            Description=ChartinkTrade FastAPI backend
+            After=network.target mongod.service
+            Requires=mongod.service
+
+            [Service]
+            Type=simple
+            User=$APP_USER
+            Group=$APP_USER
+            WorkingDirectory=$APP_DIR/backend
+            EnvironmentFile=$APP_DIR/backend/.env
+            ExecStart=$APP_DIR/backend/.venv/bin/uvicorn server:app --host 127.0.0.1 --port 8001 --workers 1
+            Restart=on-failure
+            RestartSec=5
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+
+            cat <<EOF | sudo tee /etc/nginx/sites-available/chartink >/dev/null
+            server {
+              listen 80;
+              server_name $DOMAIN www.$DOMAIN;
+
+              root $APP_DIR/frontend/build;
+              index index.html;
+
+              location / {
+                try_files \$uri /index.html;
+              }
+
+              location /api/ {
+                proxy_pass http://127.0.0.1:8001;
+                proxy_http_version 1.1;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto \$scheme;
+              }
+            }
+            EOF
+
+            sudo ln -sf /etc/nginx/sites-available/chartink /etc/nginx/sites-enabled/chartink
+            sudo rm -f /etc/nginx/sites-enabled/default
+            sudo nginx -t
+
+            sudo systemctl daemon-reload
+            sudo systemctl enable --now mongod
+            sudo systemctl enable --now chartink-backend
+            sudo systemctl restart chartink-backend
+            sudo systemctl restart nginx
+
+            sudo ufw allow 22/tcp || true
+            sudo ufw allow 80/tcp || true
+            sudo ufw allow 443/tcp || true
+            sudo ufw --force enable
+
+            sudo certbot --nginx -d "$DOMAIN" -d "www.$DOMAIN" --redirect -m "$CONTACT_EMAIL" --agree-tos -n || true
+            sudo systemctl restart nginx
+
+            curl -fsS http://127.0.0.1:8001/api/health >/dev/null
+            curl -fsS https://$DOMAIN/api/health >/dev/null
+            echo "Deployment completed successfully."
