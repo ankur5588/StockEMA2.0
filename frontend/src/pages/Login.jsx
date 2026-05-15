@@ -1,8 +1,36 @@
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Activity, AlertTriangle, ArrowUpRight, Shield, Zap } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  ArrowUpRight,
+  Loader2,
+  Lock,
+  Mail,
+  Shield,
+  User,
+  Zap,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { api, setSessionToken } from "@/lib/api";
+
+function formatApiError(detail, fallback = "Something went wrong. Please try again.") {
+  if (detail == null) return fallback;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return (
+      detail
+        .map((e) => (e && typeof e.msg === "string" ? e.msg : JSON.stringify(e)))
+        .filter(Boolean)
+        .join(" ") || fallback
+    );
+  }
+  if (typeof detail === "object" && typeof detail.msg === "string") return detail.msg;
+  return String(detail);
+}
 
 export default function Login() {
   const navigate = useNavigate();
@@ -24,15 +52,6 @@ export default function Login() {
       }
     })();
   }, [navigate]);
-
-  const handleGoogleLogin = () => {
-    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS,
-    // THIS BREAKS THE AUTH
-    const redirectUrl = window.location.origin + "/dashboard";
-    window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(
-      redirectUrl
-    )}`;
-  };
 
   if (checking) {
     return (
@@ -77,8 +96,9 @@ export default function Login() {
               In milliseconds.
             </h1>
             <p className="text-sm text-muted-foreground max-w-sm leading-relaxed">
-              Connect Kotak Neo. Route Chartink webhooks. Place EMA-based
-              stoploss orders on your open positions — automatically, daily.
+              Connect Kotak Neo, Dhan, Alice Blue. Route Chartink webhooks.
+              Place EMA-based stoploss orders on your open positions —
+              automatically, daily.
             </p>
             <div className="grid grid-cols-3 gap-4 pt-4">
               <Feature icon={Zap} label="Webhook" value="live" />
@@ -88,14 +108,14 @@ export default function Login() {
           </div>
 
           <div className="font-mono text-[10px] text-muted-foreground tracking-wider">
-            v1.0 · live-trading · NSE / BSE
+            v1.1 · live-trading · NSE / BSE
           </div>
         </div>
       </div>
 
-      {/* Right: login */}
+      {/* Right: auth */}
       <div className="flex items-center justify-center p-8 relative">
-        <div className="w-full max-w-sm space-y-8">
+        <div className="w-full max-w-sm space-y-6">
           <div className="lg:hidden flex items-center gap-3 mb-6">
             <div className="w-8 h-8 rounded-sm bg-brand flex items-center justify-center">
               <Activity className="w-4 h-4 text-white" strokeWidth={2.2} />
@@ -105,7 +125,7 @@ export default function Login() {
             </span>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-2">
             <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
               / sign in
             </p>
@@ -113,23 +133,9 @@ export default function Login() {
               Access your terminal
             </h2>
             <p className="text-sm text-muted-foreground">
-              Authenticate with Google to continue. Your Kotak Neo credentials
-              stay encrypted and never leave your vault.
+              Sign in with email & password, or continue with Google.
             </p>
           </div>
-
-          <Button
-            onClick={handleGoogleLogin}
-            size="lg"
-            data-testid="google-login-button"
-            className="w-full h-11 rounded-sm bg-white text-black hover:bg-white/90 font-medium text-sm justify-between px-5"
-          >
-            <span className="flex items-center gap-3">
-              <GoogleIcon />
-              Continue with Google
-            </span>
-            <ArrowUpRight className="w-4 h-4" />
-          </Button>
 
           {authError && (
             <div
@@ -138,32 +144,355 @@ export default function Login() {
             >
               <AlertTriangle className="w-4 h-4 text-loss mt-0.5 shrink-0" />
               <div className="text-xs text-loss leading-relaxed">
-                Sign-in failed: <span className="text-white font-mono">{authError}</span>
-                <br />
-                <span className="text-muted-foreground">
-                  Try once more — if the loop continues, allow third-party cookies for this site or open in a non-private window.
-                </span>
+                Sign-in failed:{" "}
+                <span className="text-white font-mono">{authError}</span>
               </div>
             </div>
           )}
 
-          <div className="pt-6 border-t border-border space-y-3">
+          <AuthTabs onAuthed={(user) =>
+            navigate("/dashboard", { replace: true, state: { user } })
+          } />
+
+          <div className="pt-4 border-t border-border space-y-2">
             <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
               / disclaimer
             </p>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              This is a live trading tool. Orders placed via Chartink webhooks
-              and EMA stoploss runs will hit your real Kotak Neo account.
-              Paper-trade first.
+              Live trading tool. Orders from Chartink webhooks and EMA stoploss
+              runs will hit your real broker accounts. Paper-trade first.
             </p>
           </div>
         </div>
 
         <div className="absolute bottom-6 right-8 font-mono text-[10px] text-muted-foreground tracking-wider">
-          secure://emergent-auth
+          secure://chartink-trade
         </div>
       </div>
     </div>
+  );
+}
+
+function AuthTabs({ onAuthed }) {
+  const [tab, setTab] = useState("signin");
+  return (
+    <Tabs value={tab} onValueChange={setTab} className="w-full">
+      <TabsList
+        className="grid w-full grid-cols-2 bg-surface-2 rounded-sm h-10"
+        data-testid="auth-tabs"
+      >
+        <TabsTrigger
+          value="signin"
+          className="rounded-sm data-[state=active]:bg-surface-3"
+          data-testid="signin-tab"
+        >
+          Sign in
+        </TabsTrigger>
+        <TabsTrigger
+          value="signup"
+          className="rounded-sm data-[state=active]:bg-surface-3"
+          data-testid="signup-tab"
+        >
+          Sign up
+        </TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="signin" className="space-y-4 pt-4">
+        <SignInForm onAuthed={onAuthed} />
+        <DividerWithText text="or" />
+        <GoogleButton />
+      </TabsContent>
+
+      <TabsContent value="signup" className="space-y-4 pt-4">
+        <SignUpForm onAuthed={onAuthed} />
+        <DividerWithText text="or" />
+        <GoogleButton />
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+function DividerWithText({ text }) {
+  return (
+    <div className="relative flex items-center gap-3">
+      <div className="flex-1 border-t border-border" />
+      <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+        {text}
+      </span>
+      <div className="flex-1 border-t border-border" />
+    </div>
+  );
+}
+
+function GoogleButton() {
+  const handleGoogleLogin = () => {
+    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS,
+    // THIS BREAKS THE AUTH
+    const redirectUrl = window.location.origin + "/dashboard";
+    window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(
+      redirectUrl
+    )}`;
+  };
+  return (
+    <Button
+      onClick={handleGoogleLogin}
+      variant="outline"
+      data-testid="google-login-button"
+      className="w-full h-10 rounded-sm bg-white text-black hover:bg-white/90 border-transparent font-medium text-sm justify-between px-4"
+    >
+      <span className="flex items-center gap-3">
+        <GoogleIcon />
+        Continue with Google
+      </span>
+      <ArrowUpRight className="w-4 h-4" />
+    </Button>
+  );
+}
+
+function SignInForm({ onAuthed }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      const { data } = await api.post("/auth/login", {
+        email: email.trim(),
+        password,
+      });
+      if (data?.session_token) setSessionToken(data.session_token);
+      onAuthed(data?.user);
+    } catch (err) {
+      setError(
+        formatApiError(
+          err?.response?.data?.detail,
+          err?.message || "Sign-in failed."
+        )
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-3" data-testid="signin-form">
+      <div className="space-y-1.5">
+        <Label htmlFor="signin-email" className="text-xs uppercase tracking-wider text-muted-foreground">
+          Email
+        </Label>
+        <div className="relative">
+          <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="signin-email"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            className="pl-9 h-10 rounded-sm bg-surface-2 border-border"
+            required
+            data-testid="signin-email-input"
+          />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="signin-password" className="text-xs uppercase tracking-wider text-muted-foreground">
+          Password
+        </Label>
+        <div className="relative">
+          <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="signin-password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            className="pl-9 h-10 rounded-sm bg-surface-2 border-border"
+            required
+            data-testid="signin-password-input"
+          />
+        </div>
+      </div>
+
+      {error && (
+        <div
+          className="border border-loss/40 bg-loss/5 rounded-sm p-2 text-xs text-loss leading-relaxed"
+          data-testid="signin-error"
+        >
+          {error}
+        </div>
+      )}
+
+      <Button
+        type="submit"
+        disabled={busy}
+        size="lg"
+        className="w-full h-10 rounded-sm bg-brand text-white hover:bg-brand/90 font-medium text-sm"
+        data-testid="signin-submit-button"
+      >
+        {busy ? (
+          <>
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Signing in...
+          </>
+        ) : (
+          <>Sign in</>
+        )}
+      </Button>
+    </form>
+  );
+}
+
+function SignUpForm({ onAuthed }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    if (password !== confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const { data } = await api.post("/auth/register", {
+        name: name.trim(),
+        email: email.trim(),
+        password,
+      });
+      if (data?.session_token) setSessionToken(data.session_token);
+      onAuthed(data?.user);
+    } catch (err) {
+      setError(
+        formatApiError(
+          err?.response?.data?.detail,
+          err?.message || "Sign-up failed."
+        )
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-3" data-testid="signup-form">
+      <div className="space-y-1.5">
+        <Label htmlFor="signup-name" className="text-xs uppercase tracking-wider text-muted-foreground">
+          Name
+        </Label>
+        <div className="relative">
+          <User className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="signup-name"
+            type="text"
+            autoComplete="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Your name"
+            className="pl-9 h-10 rounded-sm bg-surface-2 border-border"
+            required
+            data-testid="signup-name-input"
+          />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="signup-email" className="text-xs uppercase tracking-wider text-muted-foreground">
+          Email
+        </Label>
+        <div className="relative">
+          <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="signup-email"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            className="pl-9 h-10 rounded-sm bg-surface-2 border-border"
+            required
+            data-testid="signup-email-input"
+          />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="signup-password" className="text-xs uppercase tracking-wider text-muted-foreground">
+          Password
+        </Label>
+        <div className="relative">
+          <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="signup-password"
+            type="password"
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="At least 8 characters"
+            className="pl-9 h-10 rounded-sm bg-surface-2 border-border"
+            required
+            minLength={8}
+            data-testid="signup-password-input"
+          />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="signup-confirm" className="text-xs uppercase tracking-wider text-muted-foreground">
+          Confirm password
+        </Label>
+        <div className="relative">
+          <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="signup-confirm"
+            type="password"
+            autoComplete="new-password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            placeholder="Repeat password"
+            className="pl-9 h-10 rounded-sm bg-surface-2 border-border"
+            required
+            minLength={8}
+            data-testid="signup-confirm-input"
+          />
+        </div>
+      </div>
+
+      {error && (
+        <div
+          className="border border-loss/40 bg-loss/5 rounded-sm p-2 text-xs text-loss leading-relaxed"
+          data-testid="signup-error"
+        >
+          {error}
+        </div>
+      )}
+
+      <Button
+        type="submit"
+        disabled={busy}
+        size="lg"
+        className="w-full h-10 rounded-sm bg-brand text-white hover:bg-brand/90 font-medium text-sm"
+        data-testid="signup-submit-button"
+      >
+        {busy ? (
+          <>
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Creating account...
+          </>
+        ) : (
+          <>Create account</>
+        )}
+      </Button>
+    </form>
   );
 }
 

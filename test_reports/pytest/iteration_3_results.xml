@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="14" failures="0" skipped="0" tests="14" time="0.879" timestamp="2026-05-15T07:18:47.507420+00:00" hostname="agent-env-4aa460ae-0a5a-4993-bfab-c89586cb9798"><testcase classname="tests.test_email_auth.TestRegister" name="test_register_success" time="0.001"><error message="failed on setup with &quot;pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'&quot;">tests/test_email_auth.py:38: in db
+    client = MongoClient(MONGO_URL)
+             ^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:766: in __init__
+    res = uri_parser.parse_uri(
+/root/.venv/lib/python3.11/site-packages/pymongo/uri_parser.py:496: in parse_uri
+    raise InvalidURI(f"Invalid URI scheme: URI must begin with '{SCHEME}' or '{SRV_SCHEME}'")
+E   pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'</error></testcase><testcase classname="tests.test_email_auth.TestRegister" name="test_register_duplicate_returns_409" time="0.000"><error message="failed on setup with &quot;pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'&quot;">tests/test_email_auth.py:38: in db
+    client = MongoClient(MONGO_URL)
+             ^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:766: in __init__
+    res = uri_parser.parse_uri(
+/root/.venv/lib/python3.11/site-packages/pymongo/uri_parser.py:496: in parse_uri
+    raise InvalidURI(f"Invalid URI scheme: URI must begin with '{SCHEME}' or '{SRV_SCHEME}'")
+E   pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'</error></testcase><testcase classname="tests.test_email_auth.TestRegister" name="test_register_short_password_422" time="0.000"><error message="failed on setup with &quot;pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'&quot;">tests/test_email_auth.py:38: in db
+    client = MongoClient(MONGO_URL)
+             ^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:766: in __init__
+    res = uri_parser.parse_uri(
+/root/.venv/lib/python3.11/site-packages/pymongo/uri_parser.py:496: in parse_uri
+    raise InvalidURI(f"Invalid URI scheme: URI must begin with '{SCHEME}' or '{SRV_SCHEME}'")
+E   pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'</error></testcase><testcase classname="tests.test_email_auth.TestRegister" name="test_register_invalid_email_422" time="0.000"><error message="failed on setup with &quot;pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'&quot;">tests/test_email_auth.py:38: in db
+    client = MongoClient(MONGO_URL)
+             ^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:766: in __init__
+    res = uri_parser.parse_uri(
+/root/.venv/lib/python3.11/site-packages/pymongo/uri_parser.py:496: in parse_uri
+    raise InvalidURI(f"Invalid URI scheme: URI must begin with '{SCHEME}' or '{SRV_SCHEME}'")
+E   pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'</error></testcase><testcase classname="tests.test_email_auth.TestRegister" name="test_register_empty_name_422" time="0.000"><error message="failed on setup with &quot;pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'&quot;">tests/test_email_auth.py:38: in db
+    client = MongoClient(MONGO_URL)
+             ^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:766: in __init__
+    res = uri_parser.parse_uri(
+/root/.venv/lib/python3.11/site-packages/pymongo/uri_parser.py:496: in parse_uri
+    raise InvalidURI(f"Invalid URI scheme: URI must begin with '{SCHEME}' or '{SRV_SCHEME}'")
+E   pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'</error></testcase><testcase classname="tests.test_email_auth.TestLogin" name="test_login_admin_success" time="0.000"><error message="failed on setup with &quot;pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'&quot;">tests/test_email_auth.py:38: in db
+    client = MongoClient(MONGO_URL)
+             ^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:766: in __init__
+    res = uri_parser.parse_uri(
+/root/.venv/lib/python3.11/site-packages/pymongo/uri_parser.py:496: in parse_uri
+    raise InvalidURI(f"Invalid URI scheme: URI must begin with '{SCHEME}' or '{SRV_SCHEME}'")
+E   pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'</error></testcase><testcase classname="tests.test_email_auth.TestLogin" name="test_login_wrong_password_401" time="0.000"><error message="failed on setup with &quot;pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'&quot;">tests/test_email_auth.py:38: in db
+    client = MongoClient(MONGO_URL)
+             ^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:766: in __init__
+    res = uri_parser.parse_uri(
+/root/.venv/lib/python3.11/site-packages/pymongo/uri_parser.py:496: in parse_uri
+    raise InvalidURI(f"Invalid URI scheme: URI must begin with '{SCHEME}' or '{SRV_SCHEME}'")
+E   pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'</error></testcase><testcase classname="tests.test_email_auth.TestLogin" name="test_login_unknown_user_401" time="0.000"><error message="failed on setup with &quot;pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'&quot;">tests/test_email_auth.py:38: in db
+    client = MongoClient(MONGO_URL)
+             ^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:766: in __init__
+    res = uri_parser.parse_uri(
+/root/.venv/lib/python3.11/site-packages/pymongo/uri_parser.py:496: in parse_uri
+    raise InvalidURI(f"Invalid URI scheme: URI must begin with '{SCHEME}' or '{SRV_SCHEME}'")
+E   pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'</error></testcase><testcase classname="tests.test_email_auth.TestLockout" name="test_lockout_after_5_failures" time="0.000"><error message="failed on setup with &quot;pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'&quot;">tests/test_email_auth.py:38: in db
+    client = MongoClient(MONGO_URL)
+             ^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:766: in __init__
+    res = uri_parser.parse_uri(
+/root/.venv/lib/python3.11/site-packages/pymongo/uri_parser.py:496: in parse_uri
+    raise InvalidURI(f"Invalid URI scheme: URI must begin with '{SCHEME}' or '{SRV_SCHEME}'")
+E   pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'</error></testcase><testcase classname="tests.test_email_auth.TestMe" name="test_me_with_bearer" time="0.480"><error message="failed on setup with &quot;pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'&quot;">tests/test_email_auth.py:38: in db
+    client = MongoClient(MONGO_URL)
+             ^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:766: in __init__
+    res = uri_parser.parse_uri(
+/root/.venv/lib/python3.11/site-packages/pymongo/uri_parser.py:496: in parse_uri
+    raise InvalidURI(f"Invalid URI scheme: URI must begin with '{SCHEME}' or '{SRV_SCHEME}'")
+E   pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'</error></testcase><testcase classname="tests.test_email_auth.TestMe" name="test_me_without_token_unauthorized" time="0.000"><error message="failed on setup with &quot;pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'&quot;">tests/test_email_auth.py:38: in db
+    client = MongoClient(MONGO_URL)
+             ^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:766: in __init__
+    res = uri_parser.parse_uri(
+/root/.venv/lib/python3.11/site-packages/pymongo/uri_parser.py:496: in parse_uri
+    raise InvalidURI(f"Invalid URI scheme: URI must begin with '{SCHEME}' or '{SRV_SCHEME}'")
+E   pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'</error></testcase><testcase classname="tests.test_email_auth.TestExisting" name="test_health" time="0.000"><error message="failed on setup with &quot;pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'&quot;">tests/test_email_auth.py:38: in db
+    client = MongoClient(MONGO_URL)
+             ^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:766: in __init__
+    res = uri_parser.parse_uri(
+/root/.venv/lib/python3.11/site-packages/pymongo/uri_parser.py:496: in parse_uri
+    raise InvalidURI(f"Invalid URI scheme: URI must begin with '{SCHEME}' or '{SRV_SCHEME}'")
+E   pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'</error></testcase><testcase classname="tests.test_email_auth.TestExisting" name="test_brokers_status_admin" time="0.000"><error message="failed on setup with &quot;pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'&quot;">tests/test_email_auth.py:38: in db
+    client = MongoClient(MONGO_URL)
+             ^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:766: in __init__
+    res = uri_parser.parse_uri(
+/root/.venv/lib/python3.11/site-packages/pymongo/uri_parser.py:496: in parse_uri
+    raise InvalidURI(f"Invalid URI scheme: URI must begin with '{SCHEME}' or '{SRV_SCHEME}'")
+E   pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'</error></testcase><testcase classname="tests.test_email_auth.TestZCleanup" name="test_cleanup" time="0.000"><error message="failed on setup with &quot;pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'&quot;">tests/test_email_auth.py:38: in db
+    client = MongoClient(MONGO_URL)
+             ^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:766: in __init__
+    res = uri_parser.parse_uri(
+/root/.venv/lib/python3.11/site-packages/pymongo/uri_parser.py:496: in parse_uri
+    raise InvalidURI(f"Invalid URI scheme: URI must begin with '{SCHEME}' or '{SRV_SCHEME}'")
+E   pymongo.errors.InvalidURI: Invalid URI scheme: URI must begin with 'mongodb://' or 'mongodb+srv://'</error></testcase></testsuite></testsuites>

@@ -23,6 +23,7 @@ import kotak_client
 import dhan_client
 import alice_client
 import indmoney_client
+import auth_service
 from ema_service import compute_ema10
 from models import (
     AlertConfig,
@@ -1220,6 +1221,15 @@ async def deployment_info():
 
 # Mount router
 app.include_router(api)
+
+# Email + password auth router (lives under /api/auth alongside Google flow)
+app.include_router(auth_service.build_router(db), prefix="/api/auth")
+
+
+@app.on_event("startup")
+async def _startup():
+    await auth_service.ensure_indexes(db)
+    await auth_service.seed_admin(db)
 
 # CORS
 # IMPORTANT: when allow_credentials=True the browser rejects
