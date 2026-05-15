@@ -67,9 +67,22 @@ function AuthCallback() {
       .catch((e) => {
         clearSessionToken();
         _inflightAuth = null;
+        // Surface the most useful failure reason we can:
+        // - axios network error: e.message (e.g., "Network Error", "timeout of...")
+        // - HTTP error: e.response.status + e.response.data.detail
+        let reason = "Login failed";
+        if (e?.response) {
+          reason = `${e.response.status} ${
+            e.response.data?.detail || e.response.statusText || "error"
+          }`;
+        } else if (e?.message) {
+          reason = e.message;
+        }
+        // eslint-disable-next-line no-console
+        console.error("[auth] /auth/session failed:", e, "reason:", reason);
         navigate("/login", {
           replace: true,
-          state: { authError: e?.response?.data?.detail || "Login failed" },
+          state: { authError: reason },
         });
       });
   }, [navigate]);
