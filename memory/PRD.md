@@ -21,7 +21,12 @@ order. Must support multiple brokers and SEBI Static IP algo-trading rules.
 
 ## What has been implemented (latest = top)
 
-### 2026-05-15 — Manual Order + EMA10 SL + bug fix
+### 2026-05-17 — Bug fixes batch
+- ✅ Symbol Mappings CSV-template download: switched fetch `credentials: "omit"` (was `"include"`) — preview ingress' ACAO:* + Allow-Credentials:true combo silently broke it. Added `appendChild` + remove of the temp anchor and success toast.
+- ✅ Manual Order API: response now uses `HTTPException(400)` on broker error, returns clear `{status:"skipped"|"success", message, ema_sl}`. **Auto-EMA10 SL is now correctly skipped (with reason) when AMO=true or order_type=L** — avoids placing a SL before the entry has filled. Frontend shows toast.error (instead of warning) for skipped/error, plus inline result block.
+- ✅ Trade Log + Webhook Feed: added floating scroll-to-bottom button (`ArrowDownToLine` icon, bottom-right of card) that smoothly scrolls the list. Appears only when there are >5 rows.
+
+### 2026-05-15 — Manual Order + EMA10 SL
 - Bug fix: `POST /api/symbol-mappings` no longer throws `TypeError` (duplicate kwarg).
 - New endpoint `POST /api/orders/manual` — broker, symbol, side, qty, order_type
   (MKT/L), price, product (CNC/MIS/NRML), exchange, **AMO** toggle,

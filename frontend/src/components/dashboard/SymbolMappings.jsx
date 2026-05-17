@@ -138,23 +138,34 @@ export default function SymbolMappings() {
   };
 
   const downloadTemplate = async () => {
-    // Use direct fetch with bearer header to trigger browser download
+    // Use direct fetch with bearer header to trigger browser download.
+    // NOTE: credentials must be "omit" — the preview ingress force-sets
+    // Access-Control-Allow-Origin:* alongside Allow-Credentials:true, which
+    // browsers reject under credentials mode. The bearer token alone is
+    // enough — the backend accepts it as the auth path.
     const token = getSessionToken();
-    const res = await fetch(`${API_BASE}/symbol-mappings/csv-template`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      credentials: "include",
-    });
-    if (!res.ok) {
-      toast.error("Failed to download template");
-      return;
+    try {
+      const res = await fetch(`${API_BASE}/symbol-mappings/csv-template`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: "omit",
+      });
+      if (!res.ok) {
+        toast.error(`Failed to download template (HTTP ${res.status})`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "symbol_mappings_template.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("CSV template downloaded");
+    } catch (err) {
+      toast.error(err?.message || "Failed to download template");
     }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "symbol_mappings_template.csv";
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   return (

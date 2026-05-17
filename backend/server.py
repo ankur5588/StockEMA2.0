@@ -1119,14 +1119,29 @@ async def place_manual_order(payload: ManualOrderInput, user: User = Depends(req
         "ema_sl": None,
     }
 
-    if status != "success":
-        # Don't try to place a stoploss when the entry failed
-        if status == "error":
-            raise HTTPException(status_code=400, detail=msg)
+    if status == "error":
+        # Surface the broker error to the caller as 400 so the FE can show it
+        raise HTTPException(status_code=400, detail=msg)
+    if status == "skipped":
+        # 200 with ok:false — broker is not authenticated yet. FE will warn.
         return response
 
-    # Optional EMA10 stoploss (only for BUY entries that hold a long position)
-    if payload.auto_ema_sl and payload.transaction_type.upper() in ("B", "BUY"):
+    # status == "success" beyond this point.
+    # Only auto-place an EMA10 SL when:
+    #   - the entry was a BUY (we want to protect a long),
+    #   - the entry was a MARKET order (so we know it filled immediately),
+    #   - AMO is OFF (otherwise the entry hasn't filled yet — SL would
+    #     trigger before there's a position).
+    sl_skipped_reason = None
+    if payload.auto_ema_sl:
+        if payload.transaction_type.upper() not in ("B", "BUY"):
+            sl_skipped_reason = "auto-SL only applies to BUY entries"
+        elif payload.amo:
+            sl_skipped_reason = "AMO: SL will be set by the next daily EMA10 run"
+        elif payload.order_type.upper() in ("L", "LIMIT"):
+            sl_skipped_reason = "Limit entry: SL skipped (run EMA10 SL after fill)"
+
+    if payload.auto_ema_sl and sl_skipped_reason is None:
         ema, sl_oid, sl_msg = _place_ema_sl_for(
             user_id=user.user_id,
             broker=broker,
@@ -1172,6 +1187,13 @@ async def place_manual_order(payload: ManualOrderInput, user: User = Depends(req
             "status": sl_status,
             "order_id": sl_oid,
             "message": sl_msg,
+        }
+    elif payload.auto_ema_sl and sl_skipped_reason:
+        response["ema_sl"] = {
+            "ema10": None,
+            "status": "skipped",
+            "order_id": None,
+            "message": sl_skipped_reason,
         }
 
     return response
