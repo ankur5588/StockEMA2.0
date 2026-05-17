@@ -21,6 +21,16 @@ order. Must support multiple brokers and SEBI Static IP algo-trading rules.
 
 ## What has been implemented (latest = top)
 
+### 2026-05-17 — Portfolio Risk dashboard
+- ✅ New `GET /api/portfolio/risk` endpoint — aggregates LONG positions across
+  all connected brokers, computes EMA10 SL value per position, and rolls up:
+  `current_value`, `sl_value`, `invested`, `risk_amount`, `risk_pct`,
+  `pnl_amount`, `pnl_pct`, `open_positions`. Returns per-position breakdown +
+  positions where EMA10 is unavailable.
+- ✅ New `PortfolioRiskCard.jsx` — 4 KPI tiles + animated risk meter (green ≤2%,
+  amber ≤5%, red >5%) + sortable per-position breakdown table. Empty state
+  when no broker connected.
+
 ### 2026-05-17 — INDmoney integration + CSV download fix
 - ✅ INDmoney is now a fully wired 4th broker:
   - Backend: 6 new endpoints under `/api/indmoney/*` (credentials CRUD, status, connect, disconnect, positions).

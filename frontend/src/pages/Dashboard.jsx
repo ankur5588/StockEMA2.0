@@ -14,6 +14,7 @@ import WebhookLog from "@/components/dashboard/WebhookLog";
 import ComplianceCard from "@/components/dashboard/ComplianceCard";
 import SymbolMappings from "@/components/dashboard/SymbolMappings";
 import ManualOrderCard from "@/components/dashboard/ManualOrderCard";
+import PortfolioRiskCard from "@/components/dashboard/PortfolioRiskCard";
 import { api } from "@/lib/api";
 
 export default function Dashboard({ user }) {
@@ -99,6 +100,9 @@ export default function Dashboard({ user }) {
           </div>
           <AlertsConfig />
         </div>
+
+        {/* Portfolio Risk (full-width) */}
+        <PortfolioRiskCard anyAuthenticated={anyAuth} />
 
         {/* Manual Order */}
         <ManualOrderCard brokersStatus={status} reload={loadStatus} />

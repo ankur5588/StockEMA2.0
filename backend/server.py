@@ -680,6 +680,127 @@ async def all_positions(user: User = Depends(require_user)):
     return {"positions": positions, "errors": errors}
 
 
+@api.get("/portfolio/risk")
+async def portfolio_risk(user: User = Depends(require_user)):
+    """Aggregate LONG positions across all authenticated brokers and compute
+    downside risk if the EMA10 stoploss were to hit on every position.
+
+    Per-position fields:
+      symbol, broker, exchange_segment, quantity, avg_price, ltp, ema10
+      current_value  = quantity * (ltp or avg_price)
+      sl_value       = quantity * ema10       (None if EMA unavailable)
+      risk_amount    = current_value - sl_value
+      risk_pct       = risk_amount / current_value * 100
+
+    Totals roll up only positions where ema10 is available so the % stays
+    meaningful. Positions missing EMA data are reported separately.
+    """
+    rows = []
+    errors = {}
+    if kotak_client.is_authenticated(user.user_id):
+        try:
+            rows.extend(_normalise_positions(kotak_client.get_positions(user.user_id)))
+        except Exception as e:
+            errors["kotak_neo"] = str(e)
+    if dhan_client.is_authenticated(user.user_id):
+        try:
+            rows.extend(dhan_client.get_positions(user.user_id))
+        except Exception as e:
+            errors["dhan"] = str(e)
+    if alice_client.is_authenticated(user.user_id):
+        try:
+            rows.extend(alice_client.get_positions(user.user_id))
+        except Exception as e:
+            errors["alice_blue"] = str(e)
+    if indmoney_client.is_authenticated(user.user_id):
+        try:
+            rows.extend(indmoney_client.get_positions(user.user_id))
+        except Exception as e:
+            errors["indmoney"] = str(e)
+
+    enriched: List[dict] = []
+    missing_ema: List[dict] = []
+    totals = {
+        "current_value": 0.0,
+        "sl_value": 0.0,
+        "invested": 0.0,
+        "risk_amount": 0.0,
+        "open_positions": 0,
+    }
+    for pos in rows:
+        qty = int(pos.get("quantity") or 0)
+        if qty <= 0:
+            # Only long positions contribute to EMA10 downside risk
+            continue
+        symbol = pos.get("symbol") or ""
+        broker = pos.get("broker") or "?"
+        ex_seg = pos.get("exchange_segment") or "nse_cm"
+        avg = float(pos.get("avg_price") or 0)
+        ltp = pos.get("ltp")
+        ltp_f = float(ltp) if ltp not in (None, "") else None
+        mark_price = ltp_f if ltp_f and ltp_f > 0 else avg
+        current_value = round(qty * mark_price, 2)
+        invested = round(qty * avg, 2)
+        ema10 = compute_ema10(symbol, ex_seg)
+
+        item = {
+            "symbol": symbol,
+            "broker": broker,
+            "exchange_segment": ex_seg,
+            "quantity": qty,
+            "avg_price": round(avg, 2),
+            "ltp": round(ltp_f, 2) if ltp_f else None,
+            "mark_price": round(mark_price, 2),
+            "ema10": ema10,
+            "current_value": current_value,
+            "invested": invested,
+        }
+        totals["open_positions"] += 1
+        totals["invested"] += invested
+
+        if ema10 is None or ema10 <= 0:
+            item["sl_value"] = None
+            item["risk_amount"] = None
+            item["risk_pct"] = None
+            missing_ema.append(item)
+            continue
+
+        sl_value = round(qty * ema10, 2)
+        risk_amount = round(current_value - sl_value, 2)
+        risk_pct = round((risk_amount / current_value) * 100, 2) if current_value > 0 else 0.0
+        item["sl_value"] = sl_value
+        item["risk_amount"] = risk_amount
+        item["risk_pct"] = risk_pct
+        enriched.append(item)
+
+        totals["current_value"] += current_value
+        totals["sl_value"] += sl_value
+        totals["risk_amount"] += risk_amount
+
+    # Round totals
+    for k in ("current_value", "sl_value", "invested", "risk_amount"):
+        totals[k] = round(totals[k], 2)
+    totals["risk_pct"] = (
+        round((totals["risk_amount"] / totals["current_value"]) * 100, 2)
+        if totals["current_value"] > 0
+        else 0.0
+    )
+    totals["pnl_amount"] = round(totals["current_value"] - totals["invested"], 2)
+    totals["pnl_pct"] = (
+        round((totals["pnl_amount"] / totals["invested"]) * 100, 2)
+        if totals["invested"] > 0
+        else 0.0
+    )
+
+    return {
+        "totals": totals,
+        "positions": enriched,
+        "positions_missing_ema": missing_ema,
+        "errors": errors,
+        "computed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 # =============================================================================
 # ALERT CONFIGS
 # =============================================================================
