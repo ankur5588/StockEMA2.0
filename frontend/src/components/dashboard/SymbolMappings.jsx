@@ -20,13 +20,14 @@ import {
 } from "@/components/ui/table";
 import { Plus, Trash2, Upload, Download, Trash } from "lucide-react";
 import { toast } from "sonner";
-import { api, API_BASE, getSessionToken } from "@/lib/api";
+import { api } from "@/lib/api";
 
 const BROKERS = [
   { value: "*", label: "Any" },
   { value: "kotak_neo", label: "Kotak" },
   { value: "dhan", label: "Dhan" },
   { value: "alice_blue", label: "Alice" },
+  { value: "indmoney", label: "INDmoney" },
 ];
 
 const blank = {
@@ -137,24 +138,34 @@ export default function SymbolMappings() {
     }
   };
 
-  const downloadTemplate = async () => {
-    // Use direct fetch with bearer header to trigger browser download
-    const token = getSessionToken();
-    const res = await fetch(`${API_BASE}/symbol-mappings/csv-template`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      credentials: "include",
-    });
-    if (!res.ok) {
-      toast.error("Failed to download template");
-      return;
+  const downloadTemplate = () => {
+    // Generate the CSV entirely client-side — no API call needed.
+    // This avoids any auth/CORS/ingress quirk that was blocking the download
+    // when fetched from the backend.
+    const sample =
+      "chartink_symbol,nse_symbol,quantity,amount,broker,transaction_type,product\n" +
+      "RELIANCE,RELIANCE-EQ,1,,kotak_neo,B,CNC\n" +
+      "TCS,TCS,,5000,dhan,B,CNC\n" +
+      "INFY,INFY,5,,*,B,CNC\n" +
+      "HDFCBANK,HDFCBANK-EQ,,10000,indmoney,B,CNC\n";
+    try {
+      const blob = new Blob([sample], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "symbol_mappings_template.csv";
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      // Defer revoke so the browser definitely picks up the download
+      setTimeout(() => {
+        a.remove();
+        URL.revokeObjectURL(url);
+      }, 100);
+      toast.success("CSV template downloaded");
+    } catch (err) {
+      toast.error(err?.message || "Download failed");
     }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "symbol_mappings_template.csv";
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -325,7 +336,7 @@ export default function SymbolMappings() {
                   <TableCell className="font-mono text-xs py-2 px-3 text-right">{m.quantity ?? "—"}</TableCell>
                   <TableCell className="font-mono text-xs py-2 px-3 text-right">{m.amount ? `₹${m.amount}` : "—"}</TableCell>
                   <TableCell className="text-[10px] py-2 px-3 uppercase tracking-wider text-muted-foreground">
-                    {m.broker === "*" ? "any" : m.broker === "kotak_neo" ? "Kotak" : m.broker === "dhan" ? "Dhan" : "Alice"}
+                    {m.broker === "*" ? "any" : m.broker === "kotak_neo" ? "Kotak" : m.broker === "dhan" ? "Dhan" : m.broker === "alice_blue" ? "Alice" : m.broker === "indmoney" ? "INDmoney" : m.broker}
                   </TableCell>
                   <TableCell className="py-2 px-3">
                     <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded-sm border ${m.transaction_type === "B" ? "border-profit/30 text-profit bg-profit/10" : "border-loss/30 text-loss bg-loss/10"}`}>

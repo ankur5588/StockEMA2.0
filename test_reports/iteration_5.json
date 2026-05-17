@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 5 complete — 100% pass on all new INDmoney plumbing + the client-side CSV template download. Backend: 15/15 pytest tests pass in /app/backend/tests/test_indmoney_iteration5.py. Verified: (1) GET /api/brokers/status now contains an 'indmoney' block with has_credentials/is_authenticated/last_login_at alongside kotak_neo/dhan/alice_blue/webhook_token; (2) POST /api/indmoney/credentials is idempotent — saving twice (different tokens) both return 200 and GET /api/indmoney/status reflects has_credentials=true; (3) DELETE /api/indmoney/credentials clears creds (subsequent GET shows has_credentials=false); (4) POST /api/indmoney/connect with no creds returns 400 'Save INDmoney credentials first'; with stub creds returns 400 with IndMoneyError message (upstream unreachable in preview env — expected); (5) POST /api/orders/manual broker='indmoney' with no live creds returns 200 + status='skipped' + message containing 'INDmoney not authenticated'; broker='foo' still returns 400; (6) CSV upload now accepts 'indmoney' rows (HDFC,HDFCBANK,,10000,indmoney,B,CNC inserted, not rejected); (7) regressions: kotak_neo manual order still returns skipped, ema-preview/RELIANCE > 0, /auth/me with bearer works, POST /api/symbol-mappings still saves. FRONTEND verified via Playwright: (a) Dashboard renders 4 broker cards on lg viewport — kotak (data-testid='connection-card'), dhan-card, alice-card, indmoney-card — with INDmoney card showing the 'static IP whitelisting' + 'US-stocks not available' helper note; (b) Clicking indmoney-edit-creds opens indmoney-setup-dialog, filling the indmoney-access-token-input and clicking indmoney-save-btn shows toast 'INDmoney credentials saved' and the status pill flips to 'needs connect'; (c) indmoney-wipe-btn deletes creds (toast 'INDmoney credentials wiped'); (d) CSV template button triggers a real browser download (file 204 bytes, suggested filename 'symbol_mappings_template.csv', contains exactly 1 header + 4 example rows incl. 'HDFCBANK,HDFCBANK-EQ,,10000,indmoney,B,CNC'); (e) AlertsConfig broker dropdown contains options ['Kotak','Dhan','Alice','INDmoney']; (f) ManualOrderCard broker dropdown contains ['Kotak Neo (offline)','Dhan (offline)','Alice Blue (offline)','INDmoney (offline)'].",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_indmoney_iteration5.py",
+    "/app/test_reports/pytest/iteration_5_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now ~1569 lines (was 1437 in iteration 4) — still growing. Strongly recommend splitting into routers/{auth,kotak,dhan,alice,indmoney,brokers,webhooks,orders,symbol_mappings,ema_sl}.py for maintainability. Currently violates >700 LOC guideline by 2.2x.",
+    "POST /api/symbol-mappings/upload reads raw body via request.body() with no Content-Type negotiation. It accepts text/csv, but multipart form-data uploads (the natural way to POST a file from a browser) won't work — would have to be sent as raw blob. Acceptable for now since the FE Upload CSV uses fetch with body=text, but should be documented or extended to accept multipart UploadFile too.",
+    "INDmoney connect endpoint stores plaintext last_login_at on the same doc that holds encrypted creds — fine. But the doc shape mixes encrypted blob + plaintext metadata; consider splitting into indmoney_sessions collection for cleaner separation (same pattern as login_attempts).",
+    "indmoney_client is a module-level singleton storing sessions in a process-local dict (presumably). On gunicorn multi-worker / k8s pod restart, sessions disappear; the UI's 'connected' pill will momentarily look auth=true on one worker and false on another. Not blocking, but should be moved to a Mongo-backed session store eventually. (Same caveat applies to existing kotak/dhan/alice clients.)",
+    "Helper text in INDmoneyCard.jsx says 'US-stocks are not available' which is correct per INDstocks API docs, but it's worth noting that the same disclaimer should ideally be surfaced when a user picks 'indmoney' in ManualOrderCard / AlertsConfig as well — right now it's only visible on the broker card."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_indmoney_iteration5.py (new — 15 tests, 100% pass)"
+  ],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "100% (all 6 flows in review-request verified)"},
+  "test_credentials": "admin@chartink.local / admin123 (from /app/memory/test_credentials.md). Cleared db.login_attempts before testing.",
+  "seed_data_creation": "Tests upsert + delete an indmoney_credentials doc for the admin user during the run; clean state restored. CSV upload test inserts then deletes one symbol_mappings row (HDFC/indmoney). Manual symbol-mappings POST test self-cleans via DB delete by chartink_symbol prefix TEST_IT5_.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 5 = 100% pass. INDmoney plumbing + CSV template download fully verified end-to-end. Run regression: cd /app/backend && pytest tests/test_indmoney_iteration5.py -v (15 tests). Key facts: (1) /api/indmoney/connect ALWAYS fails in preview env because INDmoney upstream requires a real bearer + static IP — this is expected. Test only validates the error path returns 400 with IndMoneyError. (2) /api/symbol-mappings/upload reads request.body() raw — POST CSV as plain text/csv body, NOT multipart files=. (3) FE CSV download is now 100% client-side Blob via <a download>; tested via Playwright's page.expect_download() — file is 204 bytes with header + 4 sample rows. (4) Dashboard now uses lg:grid-cols-4 for the broker section — at 1920x1080 all 4 cards (kotak/dhan/alice/indmoney) fit on one row. (5) data-testids confirmed working: indmoney-card, indmoney-edit-creds, indmoney-setup-dialog, indmoney-access-token-input, indmoney-save-btn, indmoney-wipe-btn, indmoney-disconnect-btn, indmoney-connect-btn (latter only visible when hasCreds && !isAuth), download-csv-template-button. (6) Iteration 4 tests at /app/backend/tests/test_manual_order_and_mappings.py and iteration 3 at test_email_auth.py still relevant for full regression."
+}

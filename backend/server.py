@@ -533,6 +533,71 @@ async def alice_positions(user: User = Depends(require_user)):
 
 
 # =============================================================================
+# INDMONEY
+# =============================================================================
+
+@api.post("/indmoney/credentials")
+async def indmoney_save_credentials(payload: IndMoneyCredentialsInput, user: User = Depends(require_user)):
+    creds = {k: v.strip() for k, v in payload.model_dump().items()}
+    encrypted = encrypt_dict(creds)
+    await db.indmoney_credentials.update_one(
+        {"user_id": user.user_id},
+        {"$set": {"user_id": user.user_id, "encrypted": encrypted,
+                  "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@api.delete("/indmoney/credentials")
+async def indmoney_delete_credentials(user: User = Depends(require_user)):
+    await db.indmoney_credentials.delete_one({"user_id": user.user_id})
+    indmoney_client.disconnect(user.user_id)
+    return {"ok": True}
+
+
+@api.get("/indmoney/status")
+async def indmoney_status(user: User = Depends(require_user)):
+    doc = await db.indmoney_credentials.find_one({"user_id": user.user_id}, {"_id": 0})
+    return {
+        "has_credentials": bool(doc),
+        "is_authenticated": indmoney_client.is_authenticated(user.user_id),
+        "last_login_at": (doc or {}).get("last_login_at"),
+    }
+
+
+@api.post("/indmoney/connect")
+async def indmoney_connect(user: User = Depends(require_user)):
+    doc = await db.indmoney_credentials.find_one({"user_id": user.user_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=400, detail="Save INDmoney credentials first")
+    creds = decrypt_dict(doc["encrypted"])
+    try:
+        indmoney_client.connect(user.user_id, creds["access_token"])
+    except indmoney_client.IndMoneyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.indmoney_credentials.update_one(
+        {"user_id": user.user_id},
+        {"$set": {"last_login_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"ok": True}
+
+
+@api.post("/indmoney/disconnect")
+async def indmoney_disconnect(user: User = Depends(require_user)):
+    indmoney_client.disconnect(user.user_id)
+    return {"ok": True}
+
+
+@api.get("/indmoney/positions")
+async def indmoney_positions(user: User = Depends(require_user)):
+    try:
+        return {"positions": indmoney_client.get_positions(user.user_id)}
+    except indmoney_client.IndMoneyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# =============================================================================
 # UNIFIED BROKERS & POSITIONS
 # =============================================================================
 
@@ -557,6 +622,7 @@ async def brokers_status(request: Request, user: User = Depends(require_user)):
     kotak_doc = await _get_creds_doc(user.user_id)
     dhan_doc = await db.dhan_credentials.find_one({"user_id": user.user_id}, {"_id": 0})
     alice_doc = await db.alice_credentials.find_one({"user_id": user.user_id}, {"_id": 0})
+    indmoney_doc = await db.indmoney_credentials.find_one({"user_id": user.user_id}, {"_id": 0})
     webhook_token = await _ensure_user_webhook_token(user.user_id)
     base = _base_url_from_request(request)
     return {
@@ -576,6 +642,11 @@ async def brokers_status(request: Request, user: User = Depends(require_user)):
             "is_authenticated": alice_client.is_authenticated(user.user_id),
             "last_login_at": (alice_doc or {}).get("last_login_at"),
         },
+        "indmoney": {
+            "has_credentials": bool(indmoney_doc),
+            "is_authenticated": indmoney_client.is_authenticated(user.user_id),
+            "last_login_at": (indmoney_doc or {}).get("last_login_at"),
+        },
         "webhook_token": webhook_token,
         "webhook_url": f"{base}/api/webhooks/chartink/{webhook_token}",
     }
@@ -586,7 +657,6 @@ async def all_positions(user: User = Depends(require_user)):
     """Aggregate positions from all authenticated brokers."""
     positions = []
     errors = {}
-    # Kotak
     if kotak_client.is_authenticated(user.user_id):
         try:
             positions.extend(_normalise_positions(kotak_client.get_positions(user.user_id)))
@@ -602,7 +672,133 @@ async def all_positions(user: User = Depends(require_user)):
             positions.extend(alice_client.get_positions(user.user_id))
         except Exception as e:
             errors["alice_blue"] = str(e)
+    if indmoney_client.is_authenticated(user.user_id):
+        try:
+            positions.extend(indmoney_client.get_positions(user.user_id))
+        except Exception as e:
+            errors["indmoney"] = str(e)
     return {"positions": positions, "errors": errors}
+
+
+@api.get("/portfolio/risk")
+async def portfolio_risk(user: User = Depends(require_user)):
+    """Aggregate LONG positions across all authenticated brokers and compute
+    downside risk if the EMA10 stoploss were to hit on every position.
+
+    Per-position fields:
+      symbol, broker, exchange_segment, quantity, avg_price, ltp, ema10
+      current_value  = quantity * (ltp or avg_price)
+      sl_value       = quantity * ema10       (None if EMA unavailable)
+      risk_amount    = current_value - sl_value
+      risk_pct       = risk_amount / current_value * 100
+
+    Totals roll up only positions where ema10 is available so the % stays
+    meaningful. Positions missing EMA data are reported separately.
+    """
+    rows = []
+    errors = {}
+    if kotak_client.is_authenticated(user.user_id):
+        try:
+            rows.extend(_normalise_positions(kotak_client.get_positions(user.user_id)))
+        except Exception as e:
+            errors["kotak_neo"] = str(e)
+    if dhan_client.is_authenticated(user.user_id):
+        try:
+            rows.extend(dhan_client.get_positions(user.user_id))
+        except Exception as e:
+            errors["dhan"] = str(e)
+    if alice_client.is_authenticated(user.user_id):
+        try:
+            rows.extend(alice_client.get_positions(user.user_id))
+        except Exception as e:
+            errors["alice_blue"] = str(e)
+    if indmoney_client.is_authenticated(user.user_id):
+        try:
+            rows.extend(indmoney_client.get_positions(user.user_id))
+        except Exception as e:
+            errors["indmoney"] = str(e)
+
+    enriched: List[dict] = []
+    missing_ema: List[dict] = []
+    totals = {
+        "current_value": 0.0,
+        "sl_value": 0.0,
+        "invested": 0.0,
+        "risk_amount": 0.0,
+        "open_positions": 0,
+    }
+    for pos in rows:
+        qty = int(pos.get("quantity") or 0)
+        if qty <= 0:
+            # Only long positions contribute to EMA10 downside risk
+            continue
+        symbol = pos.get("symbol") or ""
+        broker = pos.get("broker") or "?"
+        ex_seg = pos.get("exchange_segment") or "nse_cm"
+        avg = float(pos.get("avg_price") or 0)
+        ltp = pos.get("ltp")
+        ltp_f = float(ltp) if ltp not in (None, "") else None
+        mark_price = ltp_f if ltp_f and ltp_f > 0 else avg
+        current_value = round(qty * mark_price, 2)
+        invested = round(qty * avg, 2)
+        ema10 = compute_ema10(symbol, ex_seg)
+
+        item = {
+            "symbol": symbol,
+            "broker": broker,
+            "exchange_segment": ex_seg,
+            "quantity": qty,
+            "avg_price": round(avg, 2),
+            "ltp": round(ltp_f, 2) if ltp_f else None,
+            "mark_price": round(mark_price, 2),
+            "ema10": ema10,
+            "current_value": current_value,
+            "invested": invested,
+        }
+        totals["open_positions"] += 1
+        totals["invested"] += invested
+
+        if ema10 is None or ema10 <= 0:
+            item["sl_value"] = None
+            item["risk_amount"] = None
+            item["risk_pct"] = None
+            missing_ema.append(item)
+            continue
+
+        sl_value = round(qty * ema10, 2)
+        risk_amount = round(current_value - sl_value, 2)
+        risk_pct = round((risk_amount / current_value) * 100, 2) if current_value > 0 else 0.0
+        item["sl_value"] = sl_value
+        item["risk_amount"] = risk_amount
+        item["risk_pct"] = risk_pct
+        enriched.append(item)
+
+        totals["current_value"] += current_value
+        totals["sl_value"] += sl_value
+        totals["risk_amount"] += risk_amount
+
+    # Round totals
+    for k in ("current_value", "sl_value", "invested", "risk_amount"):
+        totals[k] = round(totals[k], 2)
+    totals["risk_pct"] = (
+        round((totals["risk_amount"] / totals["current_value"]) * 100, 2)
+        if totals["current_value"] > 0
+        else 0.0
+    )
+    totals["pnl_amount"] = round(totals["current_value"] - totals["invested"], 2)
+    totals["pnl_pct"] = (
+        round((totals["pnl_amount"] / totals["invested"]) * 100, 2)
+        if totals["invested"] > 0
+        else 0.0
+    )
+
+    return {
+        "totals": totals,
+        "positions": enriched,
+        "positions_missing_ema": missing_ema,
+        "errors": errors,
+        "computed_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 # =============================================================================
@@ -724,7 +920,7 @@ async def upload_symbol_mappings_csv(request: Request, user: User = Depends(requ
         qty_raw = row.get("quantity") or row.get("qty") or ""
         amt_raw = row.get("amount") or row.get("amt") or ""
         broker = (row.get("broker") or "*").lower() or "*"
-        if broker not in ("kotak_neo", "dhan", "alice_blue", "*"):
+        if broker not in ("kotak_neo", "dhan", "alice_blue", "indmoney", "*"):
             errors.append(f"line {line}: invalid broker '{broker}'")
             continue
         try:
@@ -983,8 +1179,19 @@ def _route_order(user_id, broker, symbol, transaction_type, quantity, product,
                 amo=amo,
             )
             return ("success", resp.get("order_id"), f"Alice order placed for {symbol}")
+        if broker == "indmoney":
+            if not indmoney_client.is_authenticated(user_id):
+                return ("skipped", None, "INDmoney not authenticated")
+            resp = indmoney_client.place_order(
+                user_id=user_id, symbol=symbol,
+                transaction_type=transaction_type, quantity=quantity,
+                order_type=order_type, product=product,
+                exchange_segment=("NSE" if exchange_segment.lower().startswith("nse") else "BSE"),
+                price=float(price), trigger_price=float(trigger_price),
+            )
+            return ("success", resp.get("order_id"), f"INDmoney order placed for {symbol}")
         return ("error", None, f"Unknown broker '{broker}'")
-    except (kotak_client.KotakError, dhan_client.DhanError, alice_client.AliceError) as e:
+    except (kotak_client.KotakError, dhan_client.DhanError, alice_client.AliceError, indmoney_client.IndMoneyError) as e:
         return ("error", None, str(e))
     except Exception as e:
         return ("error", None, f"unexpected: {e}")
@@ -1058,10 +1265,19 @@ def _place_ema_sl_for(user_id: str, broker: str, symbol: str, quantity: int,
                 price=limit_price, trigger_price=ema,
             )
             oid = resp.get("order_id")
+        elif broker == "indmoney":
+            resp = indmoney_client.place_order(
+                user_id=user_id, symbol=symbol,
+                transaction_type="S", quantity=quantity,
+                order_type="SL", product=product,
+                exchange_segment=("NSE" if exchange_segment.lower().startswith("nse") else "BSE"),
+                price=limit_price, trigger_price=ema,
+            )
+            oid = resp.get("order_id")
         else:
             return (ema, None, f"EMA10: unsupported broker '{broker}'")
         return (ema, oid, f"EMA10 SL placed @ {ema} (limit {limit_price})")
-    except (kotak_client.KotakError, dhan_client.DhanError, alice_client.AliceError) as e:
+    except (kotak_client.KotakError, dhan_client.DhanError, alice_client.AliceError, indmoney_client.IndMoneyError) as e:
         return (ema, None, f"EMA10 SL failed: {e}")
     except Exception as e:
         return (ema, None, f"EMA10 SL unexpected error: {e}")
@@ -1077,7 +1293,7 @@ async def place_manual_order(payload: ManualOrderInput, user: User = Depends(req
       amo (bool), auto_ema_sl (bool — places a SL-SELL after a long entry only).
     """
     broker = payload.broker
-    if broker not in ("kotak_neo", "dhan", "alice_blue"):
+    if broker not in ("kotak_neo", "dhan", "alice_blue", "indmoney"):
         raise HTTPException(status_code=400, detail=f"Unsupported broker '{broker}'")
 
     # Place the main order
@@ -1119,14 +1335,29 @@ async def place_manual_order(payload: ManualOrderInput, user: User = Depends(req
         "ema_sl": None,
     }
 
-    if status != "success":
-        # Don't try to place a stoploss when the entry failed
-        if status == "error":
-            raise HTTPException(status_code=400, detail=msg)
+    if status == "error":
+        # Surface the broker error to the caller as 400 so the FE can show it
+        raise HTTPException(status_code=400, detail=msg)
+    if status == "skipped":
+        # 200 with ok:false — broker is not authenticated yet. FE will warn.
         return response
 
-    # Optional EMA10 stoploss (only for BUY entries that hold a long position)
-    if payload.auto_ema_sl and payload.transaction_type.upper() in ("B", "BUY"):
+    # status == "success" beyond this point.
+    # Only auto-place an EMA10 SL when:
+    #   - the entry was a BUY (we want to protect a long),
+    #   - the entry was a MARKET order (so we know it filled immediately),
+    #   - AMO is OFF (otherwise the entry hasn't filled yet — SL would
+    #     trigger before there's a position).
+    sl_skipped_reason = None
+    if payload.auto_ema_sl:
+        if payload.transaction_type.upper() not in ("B", "BUY"):
+            sl_skipped_reason = "auto-SL only applies to BUY entries"
+        elif payload.amo:
+            sl_skipped_reason = "AMO: SL will be set by the next daily EMA10 run"
+        elif payload.order_type.upper() in ("L", "LIMIT"):
+            sl_skipped_reason = "Limit entry: SL skipped (run EMA10 SL after fill)"
+
+    if payload.auto_ema_sl and sl_skipped_reason is None:
         ema, sl_oid, sl_msg = _place_ema_sl_for(
             user_id=user.user_id,
             broker=broker,
@@ -1173,6 +1404,13 @@ async def place_manual_order(payload: ManualOrderInput, user: User = Depends(req
             "order_id": sl_oid,
             "message": sl_msg,
         }
+    elif payload.auto_ema_sl and sl_skipped_reason:
+        response["ema_sl"] = {
+            "ema10": None,
+            "status": "skipped",
+            "order_id": None,
+            "message": sl_skipped_reason,
+        }
 
     return response
 
@@ -1197,6 +1435,7 @@ async def ema_sl_run(user: User = Depends(require_user)):
         "kotak_neo": kotak_client.is_authenticated(user.user_id),
         "dhan": dhan_client.is_authenticated(user.user_id),
         "alice_blue": alice_client.is_authenticated(user.user_id),
+        "indmoney": indmoney_client.is_authenticated(user.user_id),
     }
     if not any(connected.values()):
         raise HTTPException(status_code=400, detail="No broker authenticated. Connect at least one.")
@@ -1218,6 +1457,11 @@ async def ema_sl_run(user: User = Depends(require_user)):
             all_positions.extend(alice_client.get_positions(user.user_id))
         except Exception as e:
             logger.warning("alice positions fetch failed: %s", e)
+    if connected["indmoney"]:
+        try:
+            all_positions.extend(indmoney_client.get_positions(user.user_id))
+        except Exception as e:
+            logger.warning("indmoney positions fetch failed: %s", e)
 
     runs: List[dict] = []
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -1273,9 +1517,18 @@ async def ema_sl_run(user: User = Depends(require_user)):
                         price=limit_price, trigger_price=ema,
                     )
                     run.order_id = resp.get("order_id")
+                elif broker == "indmoney":
+                    resp = indmoney_client.place_order(
+                        user_id=user.user_id, symbol=sym,
+                        transaction_type="S", quantity=pos["quantity"],
+                        order_type="SL", product=pos.get("product") or "CNC",
+                        exchange_segment=("NSE" if str(pos.get("exchange_segment", "NSE")).upper().startswith("NSE") else "BSE"),
+                        price=limit_price, trigger_price=ema,
+                    )
+                    run.order_id = resp.get("order_id")
                 run.status = "placed"
                 run.message = f"SL placed at {ema} (limit {limit_price}) on {broker}"
-            except (kotak_client.KotakError, dhan_client.DhanError, alice_client.AliceError) as e:
+            except (kotak_client.KotakError, dhan_client.DhanError, alice_client.AliceError, indmoney_client.IndMoneyError) as e:
                 run.status = "error"
                 run.message = str(e)
             except Exception as e:

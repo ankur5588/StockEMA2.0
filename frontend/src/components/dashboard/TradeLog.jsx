@@ -1,12 +1,13 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { RefreshCw } from "lucide-react";
+import { ArrowDownToLine, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 
 export default function TradeLog() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const listRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -25,6 +26,15 @@ export default function TradeLog() {
     const t = setInterval(load, 15000);
     return () => clearInterval(t);
   }, [load]);
+
+  const scrollToBottom = () => {
+    if (listRef.current) {
+      listRef.current.scrollTo({
+        top: listRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  };
 
   return (
     <Card
@@ -52,20 +62,35 @@ export default function TradeLog() {
           Refresh
         </Button>
       </CardHeader>
-      <CardContent className="p-0">
+      <CardContent className="p-0 relative">
         {logs.length === 0 ? (
           <div className="py-10 text-center text-xs text-muted-foreground">
             No trades yet.
           </div>
         ) : (
-          <div
-            className="max-h-[360px] overflow-y-auto divide-y divide-border"
-            data-testid="trade-log-list"
-          >
-            {logs.map((l) => (
-              <LogRow key={l.id} log={l} />
-            ))}
-          </div>
+          <>
+            <div
+              ref={listRef}
+              className="max-h-[360px] overflow-y-auto divide-y divide-border scroll-smooth"
+              data-testid="trade-log-list"
+            >
+              {logs.map((l) => (
+                <LogRow key={l.id} log={l} />
+              ))}
+            </div>
+            {logs.length > 5 && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={scrollToBottom}
+                data-testid="trade-log-scroll-bottom-button"
+                className="absolute bottom-2 right-2 h-7 w-7 p-0 rounded-full bg-surface-3 hover:bg-brand text-foreground border border-border shadow-md"
+                title="Scroll to oldest"
+              >
+                <ArrowDownToLine className="w-3.5 h-3.5" />
+              </Button>
+            )}
+          </>
         )}
       </CardContent>
     </Card>

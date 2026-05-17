@@ -21,7 +21,36 @@ order. Must support multiple brokers and SEBI Static IP algo-trading rules.
 
 ## What has been implemented (latest = top)
 
-### 2026-05-15 — Manual Order + EMA10 SL + bug fix
+### 2026-05-17 — Portfolio Risk dashboard
+- ✅ New `GET /api/portfolio/risk` endpoint — aggregates LONG positions across
+  all connected brokers, computes EMA10 SL value per position, and rolls up:
+  `current_value`, `sl_value`, `invested`, `risk_amount`, `risk_pct`,
+  `pnl_amount`, `pnl_pct`, `open_positions`. Returns per-position breakdown +
+  positions where EMA10 is unavailable.
+- ✅ New `PortfolioRiskCard.jsx` — 4 KPI tiles + animated risk meter (green ≤2%,
+  amber ≤5%, red >5%) + sortable per-position breakdown table. Empty state
+  when no broker connected.
+
+### 2026-05-17 — INDmoney integration + CSV download fix
+- ✅ INDmoney is now a fully wired 4th broker:
+  - Backend: 6 new endpoints under `/api/indmoney/*` (credentials CRUD, status, connect, disconnect, positions).
+  - `/api/brokers/status`, `/api/positions/all`, `_route_order`, `_place_ema_sl_for`,
+    `/api/ema-sl/run`, `/api/orders/manual`, and CSV upload validation all extended.
+  - Frontend: new `INDmoneyCard.jsx` with setup dialog + helper note about
+    static IP whitelisting & no-US-stocks limitation.
+  - INDmoney option added to AlertsConfig + ManualOrderCard + SymbolMappings.
+  - Dashboard broker grid now `lg:grid-cols-4`.
+- ✅ Symbol Mappings CSV-template download now generated 100% client-side via
+  `Blob` — no API call. Bypasses the preview ingress' broken CORS combo that
+  silently blocked the previous fetch-based download.
+- ✅ Iteration 5 tests: 15/15 backend pass, 6/6 frontend flows verified.
+
+### 2026-05-17 — Bug fixes batch
+- ✅ Symbol Mappings CSV-template download: switched fetch `credentials: "omit"` (was `"include"`) — preview ingress' ACAO:* + Allow-Credentials:true combo silently broke it. Added `appendChild` + remove of the temp anchor and success toast.
+- ✅ Manual Order API: response now uses `HTTPException(400)` on broker error, returns clear `{status:"skipped"|"success", message, ema_sl}`. **Auto-EMA10 SL is now correctly skipped (with reason) when AMO=true or order_type=L** — avoids placing a SL before the entry has filled. Frontend shows toast.error (instead of warning) for skipped/error, plus inline result block.
+- ✅ Trade Log + Webhook Feed: added floating scroll-to-bottom button (`ArrowDownToLine` icon, bottom-right of card) that smoothly scrolls the list. Appears only when there are >5 rows.
+
+### 2026-05-15 — Manual Order + EMA10 SL
 - Bug fix: `POST /api/symbol-mappings` no longer throws `TypeError` (duplicate kwarg).
 - New endpoint `POST /api/orders/manual` — broker, symbol, side, qty, order_type
   (MKT/L), price, product (CNC/MIS/NRML), exchange, **AMO** toggle,
@@ -50,23 +79,27 @@ order. Must support multiple brokers and SEBI Static IP algo-trading rules.
 
 ## Backlog / Roadmap
 
-### 🔴 P0
-- Finish INDmoney broker integration (frontend card + brokers/status hook
-  + webhook router + EMA SL + AlertsConfig dropdown).
-
 ### 🟡 P1
 - Cron / APScheduler for automatic daily EMA10 run.
 - Dhan token auto-refresh / unlimited token registration UI.
 - Auto-detect Intraday (MIS) vs Delivery (CNC) from Chartink alert names.
+- Move broker session state from in-memory dicts to Mongo-backed sessions
+  (so multi-worker / pod restarts don't drop active broker auth).
 - Defensive backend check: reject `order_type='L'` when `price<=0` (currently FE-only).
 - Add `require_user` dependency to `/api/ema-preview/{symbol}` for consistency.
+- Surface the INDmoney "no US stocks" disclaimer in ManualOrderCard / AlertsConfig
+  when the user selects `indmoney`.
 
 ### 🟢 P2
+- Order **basket** (paste multiple symbols + 1-click AMO/SL) — extension of
+  /api/orders/manual.
 - "Test webhook" button on dashboard for 1-click pipeline verification.
 - MongoDB → S3 daily backup for trade logs & configs.
-- Forgot-password / password-reset flow (already scaffolded in playbook).
-- Refactor `server.py` (~1450 lines) into `routers/{auth,brokers,webhooks,
-  ema_sl,orders,symbol_mappings}.py`.
+- Forgot-password / password-reset flow.
+- Realtime fill-watcher to auto-place EMA10 SL the moment AMO/limit entries fill.
+- Multipart `UploadFile` support for `/api/symbol-mappings/upload` (raw text/csv only today).
+- Refactor `server.py` (~1569 lines) into modular APIRouters under
+  `routers/{auth,kotak,dhan,alice,indmoney,brokers,webhooks,orders,symbol_mappings,ema_sl}.py`.
 
 ## Tech stack
 - Backend: FastAPI, Motor (async MongoDB), bcrypt, PyJWT, yfinance, pandas,

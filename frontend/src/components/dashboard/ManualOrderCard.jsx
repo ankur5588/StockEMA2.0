@@ -19,6 +19,7 @@ const BROKERS = [
   { value: "kotak_neo", label: "Kotak Neo" },
   { value: "dhan", label: "Dhan" },
   { value: "alice_blue", label: "Alice Blue" },
+  { value: "indmoney", label: "INDmoney" },
 ];
 
 const EXCHANGES = [
@@ -121,15 +122,31 @@ export default function ManualOrderCard({ brokersStatus, reload }) {
       setLastResult(data);
       if (data.status === "success") {
         toast.success(
-          `Order placed${data.ema_sl?.status === "placed" ? ` + EMA SL @ ₹${data.ema_sl.ema10}` : ""}`
+          `Order placed${
+            data.ema_sl?.status === "placed"
+              ? ` + EMA SL @ ₹${data.ema_sl.ema10}`
+              : data.ema_sl?.status === "skipped"
+              ? ` (SL: ${data.ema_sl.message})`
+              : ""
+          }`
         );
+      } else if (data.status === "skipped") {
+        toast.error(data.message || "Broker not connected. Connect a broker first.");
       } else {
-        toast.warning(data.message || "Order was not placed");
+        toast.error(data.message || "Order was not placed");
       }
       reload?.();
     } catch (err) {
       const detail = err?.response?.data?.detail;
-      toast.error(typeof detail === "string" ? detail : "Order failed");
+      const msg =
+        typeof detail === "string"
+          ? detail
+          : detail?.[0]?.msg ||
+            err?.response?.statusText ||
+            err?.message ||
+            "Order failed";
+      setLastResult({ status: "error", message: msg, ema_sl: null });
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
