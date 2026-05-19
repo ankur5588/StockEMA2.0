@@ -277,12 +277,16 @@ systemctl reload nginx
 ok "Nginx HTTP config active"
 
 # ---------- 11. HTTPS via certbot ----------
-log "11/12 Issuing Let's Encrypt certificate"
-if ! certbot certificates 2>/dev/null | grep -q "$DOMAIN"; then
-    certbot --nginx --non-interactive --agree-tos --redirect \
-        -m "$ADMIN_EMAIL" -d "$DOMAIN"
+log "11/12 Checking Let's Encrypt certificate"
+if [[ "$DOMAIN" != *".nip.io" ]]; then
+    if ! certbot certificates 2>/dev/null | grep -q "$DOMAIN"; then
+        certbot --nginx --non-interactive --agree-tos --redirect \
+            -m "$ADMIN_EMAIL" -d "$DOMAIN"
+    else
+        ok "Certificate already exists for $DOMAIN"
+    fi
 else
-    ok "Certificate already exists for $DOMAIN"
+    ok "Skipping certbot for nip.io domain"
 fi
 systemctl reload nginx
 
