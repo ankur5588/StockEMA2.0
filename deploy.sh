@@ -105,8 +105,12 @@ fi
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
 # ---------- 3. git pull latest ----------
-log "3/12 Pulling latest code"
-sudo -u "$APP_USER" git -C "$APP_DIR" pull --ff-only || warn "git pull failed — continuing with current checkout"
+if [[ "${CI:-}" != "true" ]]; then
+    log "3/12 Pulling latest code"
+    sudo -u "$APP_USER" git -C "$APP_DIR" pull --ff-only || warn "git pull failed — continuing with current checkout"
+else
+    log "3/12 Skipping git pull (CI/CD deployment — files already synced)"
+fi
 
 # ---------- 4. FERNET_KEY ----------
 log "4/12 Ensuring FERNET_KEY exists"
@@ -157,8 +161,8 @@ ok "MongoDB auth enabled. Passwords in $MONGO_APP_PWD_FILE and $MONGO_ROOT_PWD_F
 # ---------- 6. backend .env ----------
 log "6/12 Writing backend/.env"
 ENV_FILE="$APP_DIR/backend/.env"
+MONGO_APP_PWD_ENC=$($PY_CMD -c "import urllib.parse, sys; print(urllib.parse.quote_plus(sys.argv[1]))" "$MONGO_APP_PWD")
 cat > "$ENV_FILE" <<EOF
-MONGO_APP_PWD_ENC=$($PY_CMD -c "import urllib.parse; print(urllib.parse.quote_plus('''${MONGO_APP_PWD}'''))")
 MONGO_URL=mongodb://chartink:${MONGO_APP_PWD_ENC}@127.0.0.1:27017/${DB_NAME}?authSource=${DB_NAME}
 DB_NAME=${DB_NAME}
 CORS_ORIGINS=https://${DOMAIN}
