@@ -92,7 +92,7 @@ class TestKotakCredentials:
     def test_ema_sl_run_not_auth(self, auth_client):
         r = auth_client.post(f"{API}/ema-sl/run")
         assert r.status_code == 400
-        assert "Not authenticated with Kotak Neo" in r.json().get("detail", "")
+        assert "no broker authenticated" in r.json().get("detail", "").lower()
 
 
 # ---------- WEBHOOK ----------

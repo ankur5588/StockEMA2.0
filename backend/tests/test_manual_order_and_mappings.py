@@ -94,14 +94,16 @@ class TestHealthAndAuth:
     def test_list_alerts(self, admin_token, auth):
         r = requests.get(f"{API}/alerts", headers=auth(admin_token), timeout=10)
         assert r.status_code == 200
-        assert isinstance(r.json().get("configs", r.json()), (list, dict))
+        body = r.json()
+        assert "alerts" in body
+        assert isinstance(body["alerts"], list)
 
     def test_list_trade_logs(self, admin_token, auth):
         r = requests.get(f"{API}/trades/logs", headers=auth(admin_token), timeout=10)
         assert r.status_code == 200
-        # Some implementations return {logs:[...]} others a bare list
         body = r.json()
-        assert isinstance(body, (list, dict))
+        assert "logs" in body
+        assert isinstance(body["logs"], list)
 
 
 # ---------- 1. SYMBOL MAPPINGS BUG FIX ----------
@@ -257,9 +259,15 @@ class TestEmaPreview:
             pytest.skip("yfinance returned no data (network/CDN); flaky external dep")
         assert isinstance(ema, (int, float))
         assert ema > 0
-        assert b.get("sl_trigger") == ema
-        assert b.get("sl_limit") is not None
-        assert b["sl_limit"] < ema
+        TICK = 0.05
+        trigger = b.get("sl_trigger")
+        assert trigger is not None
+        assert trigger <= ema
+        assert abs(round(trigger / TICK) - trigger / TICK) < 1e-9  # multiple of tick
+        limit = b.get("sl_limit")
+        assert limit is not None
+        assert limit < ema
+        assert abs(round(limit / TICK) - limit / TICK) < 1e-9
 
     def test_ema_preview_nonexistent_symbol(self, admin_token, auth):
         r = requests.get(f"{API}/ema-preview/NONEXISTENTSYMBOLXYZ?exchange_segment=nse_cm",

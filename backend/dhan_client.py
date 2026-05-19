@@ -135,7 +135,7 @@ def get_positions(user_id: str) -> list:
         qty = int(p.get("netQty") or p.get("quantity") or 0)
         out.append({
             "broker": "dhan",
-            "symbol": p.get("tradingSymbol") or p.get("trading_symbol"),
+            "symbol": (p.get("tradingSymbol") or p.get("trading_symbol") or "UNKNOWN").upper(),
             "exchange_segment": p.get("exchangeSegment") or p.get("exchange_segment") or "NSE_EQ",
             "security_id": p.get("securityId") or p.get("security_id"),
             "quantity": qty,

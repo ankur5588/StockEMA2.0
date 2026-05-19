@@ -59,10 +59,6 @@ def create_access_token(user_id: str, email: str) -> str:
     return jwt.encode(payload, _jwt_secret(), algorithm=JWT_ALGORITHM)
 
 
-def decode_token(token: str) -> dict:
-    return jwt.decode(token, _jwt_secret(), algorithms=[JWT_ALGORITHM])
-
-
 # ---------------------------------------------------------------------------
 # Pydantic input/output models
 # ---------------------------------------------------------------------------

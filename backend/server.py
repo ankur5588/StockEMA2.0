@@ -1,10 +1,13 @@
 """FastAPI backend for the Kotak Neo + Chartink trading automation app."""
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 import os
 import secrets
 import uuid
+from decimal import Decimal, ROUND_DOWN
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List
@@ -25,11 +28,17 @@ import alice_client
 import indmoney_client
 import auth_service
 from ema_service import compute_ema10
+from backtest_service import run_backtest, run_signal_backtest, NIFTY_100
 from models import (
     AlertConfig,
     AlertConfigInput,
     AliceCredentialsInput,
+    CategoryAmountInput,
+    CategoryAmount,
+    CATEGORIES,
     DhanCredentialsInput,
+    EmaSchedule,
+    EmaScheduleInput,
     EmaSlRun,
     IndMoneyCredentialsInput,
     KotakCredentialsInput,
@@ -43,6 +52,29 @@ from models import (
     WebhookLog,
 )
 from security import decrypt_dict, encrypt_dict
+
+# Default tick size for Indian equity exchanges (NSE/BSE cash = ₹0.05)
+TICK_SIZE = 0.05
+
+
+def round_to_tick(price: float, tick: float = TICK_SIZE) -> float:
+    """Round `price` down to the nearest multiple of `tick`.
+
+    Exchanges reject orders where the price is not a multiple of the
+    tick size (e.g. ₹100.07 when tick = ₹0.05).  We round DOWN so the
+    SL limit price is always strictly below the trigger price and the
+    order does not get rejected with EXCH:16283.
+
+    Uses Decimal arithmetic to avoid floating-point precision issues
+    (e.g. 100.1 / 0.05 must yield exactly 2002, not 2001.999...).
+    """
+    if price is None or tick <= 0:
+        return price
+    d_price = Decimal(str(price))
+    d_tick = Decimal(str(tick))
+    steps = int(d_price / d_tick)
+    return float((Decimal(steps) * d_tick).quantize(Decimal("0.01"), rounding=ROUND_DOWN))
+
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -237,7 +269,7 @@ async def save_kotak_credentials(
     cleaned = {k: (v.strip() if isinstance(v, str) else v) for k, v in payload.model_dump().items()}
     encrypted = encrypt_dict(cleaned)
     existing = await _get_creds_doc(user.user_id)
-    webhook_token = existing["webhook_token"] if existing else secrets.token_urlsafe(24)
+    webhook_token = existing.get("webhook_token") if existing else secrets.token_urlsafe(24)
     now = datetime.now(timezone.utc).isoformat()
     await db.kotak_credentials.update_one(
         {"user_id": user.user_id},
@@ -360,7 +392,8 @@ def _normalise_positions(raw: list) -> List[dict]:
             or p.get("tradingSymbol")
             or p.get("trading_symbol")
             or p.get("symbol")
-        )
+            or "UNKNOWN"
+        ).upper()
         # Quantities
         def _f(*keys, default=0.0):
             for k in keys:
@@ -831,7 +864,7 @@ async def delete_alert(alert_id: str, user: User = Depends(require_user)):
 # =============================================================================
 
 CSV_COLUMNS = ["chartink_symbol", "nse_symbol", "quantity", "amount",
-               "broker", "transaction_type", "product"]
+               "broker", "transaction_type", "product", "category"]
 
 
 async def _resolve_mapping(user_id: str, chartink_symbol: str, broker: str):
@@ -862,6 +895,8 @@ async def create_symbol_mapping(payload: SymbolMappingInput, user: User = Depend
     data = payload.model_dump()
     data["chartink_symbol"] = data["chartink_symbol"].upper().strip()
     data["nse_symbol"] = data["nse_symbol"].upper().strip()
+    if data.get("category") and data["category"] not in CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Invalid category: {data['category']}")
     mapping = SymbolMapping(user_id=user.user_id, **data)
     doc = mapping.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
@@ -875,6 +910,27 @@ async def create_symbol_mapping(payload: SymbolMappingInput, user: User = Depend
     return mapping
 
 
+@api.put("/symbol-mappings/{mapping_id}")
+async def update_symbol_mapping(mapping_id: str, payload: SymbolMappingInput, user: User = Depends(require_user)):
+    data = payload.model_dump(exclude_unset=True)
+    if "chartink_symbol" in data:
+        data["chartink_symbol"] = data["chartink_symbol"].upper().strip()
+    if "nse_symbol" in data:
+        data["nse_symbol"] = data["nse_symbol"].upper().strip()
+    if "quantity" in data and data["quantity"] is not None:
+        data["quantity"] = int(data["quantity"])
+    if "amount" in data and data["amount"] is not None:
+        data["amount"] = float(data["amount"])
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    r = await db.symbol_mappings.update_one(
+        {"id": mapping_id, "user_id": user.user_id},
+        {"$set": data},
+    )
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+    return {"ok": True}
+
+
 @api.delete("/symbol-mappings/{mapping_id}")
 async def delete_symbol_mapping(mapping_id: str, user: User = Depends(require_user)):
     await db.symbol_mappings.delete_one({"id": mapping_id, "user_id": user.user_id})
@@ -885,6 +941,26 @@ async def delete_symbol_mapping(mapping_id: str, user: User = Depends(require_us
 async def clear_symbol_mappings(user: User = Depends(require_user)):
     res = await db.symbol_mappings.delete_many({"user_id": user.user_id})
     return {"ok": True, "deleted": res.deleted_count}
+
+
+@api.get("/symbol-mappings/category-amounts")
+async def list_category_amounts(user: User = Depends(require_user)):
+    cur = db.category_amounts.find({"user_id": user.user_id}, {"_id": 0})
+    return {"amounts": [c async for c in cur]}
+
+
+@api.post("/symbol-mappings/category-amounts")
+async def set_category_amount(payload: CategoryAmountInput, user: User = Depends(require_user)):
+    cat = payload.category.lower()
+    if cat not in CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Invalid category: {cat}")
+    await db.category_amounts.update_one(
+        {"user_id": user.user_id, "category": cat},
+        {"$set": {"user_id": user.user_id, "category": cat, "amount": payload.amount,
+                   "created_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return {"ok": True}
 
 
 @api.post("/symbol-mappings/upload")
@@ -944,6 +1020,10 @@ async def upload_symbol_mappings_csv(request: Request, user: User = Depends(requ
         if prod and prod not in ("CNC", "MIS", "NRML"):
             errors.append(f"line {line}: product must be CNC / MIS / NRML")
             continue
+        category = row.get("category") or ""
+        if category and category not in CATEGORIES:
+            errors.append(f"line {line}: category must be one of {', '.join(CATEGORIES)}")
+            continue
         rows.append({
             "id": str(uuid.uuid4()),
             "user_id": user.user_id,
@@ -954,6 +1034,7 @@ async def upload_symbol_mappings_csv(request: Request, user: User = Depends(requ
             "broker": broker,
             "transaction_type": txn,
             "product": prod,
+            "category": category or None,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
 
@@ -984,9 +1065,9 @@ async def symbol_mappings_csv_template(user: User = Depends(require_user)):
     """Return a sample CSV that users can download as a starting point."""
     sample = (
         ",".join(CSV_COLUMNS) + "\n"
-        "RELIANCE,RELIANCE-EQ,1,,kotak_neo,B,CNC\n"
-        "TCS,TCS,,5000,dhan,B,CNC\n"
-        "INFY,INFY,5,,*,B,CNC\n"
+        "RELIANCE,RELIANCE-EQ,1,,kotak_neo,B,CNC,large_cap\n"
+        "TCS,TCS,,5000,dhan,B,CNC,large_cap\n"
+        "INFY,INFY,5,,*,B,CNC,\n"
     )
     return Response(content=sample, media_type="text/csv",
                     headers={"Content-Disposition": "attachment; filename=symbol_mappings_template.csv"})
@@ -1075,7 +1156,7 @@ async def chartink_webhook(token: str, request: Request):
             # Consult symbol mappings (per-symbol overrides on top of alert config)
             mapping = await _resolve_mapping(user_id, sym, broker)
             order_symbol = sym
-            order_qty = int(cfg_doc["quantity"])
+            order_qty = int(cfg_doc.get("quantity") or 1)
             order_txn = cfg_doc["transaction_type"]
             order_product = cfg_doc.get("product", "CNC")
             mapping_note = ""
@@ -1085,6 +1166,14 @@ async def chartink_webhook(token: str, request: Request):
                     order_qty = int(mapping["quantity"])
                 elif mapping.get("amount") and price and price > 0:
                     order_qty = max(1, int(mapping["amount"] // price))
+                elif mapping.get("category") and price and price > 0:
+                    # Fall back to category amount
+                    cat = await db.category_amounts.find_one(
+                        {"user_id": user_id, "category": mapping["category"]},
+                        {"_id": 0, "amount": 1},
+                    )
+                    if cat and cat.get("amount", 0) > 0:
+                        order_qty = max(1, int(cat["amount"] // price))
                 if mapping.get("transaction_type"):
                     order_txn = mapping["transaction_type"]
                 if mapping.get("product"):
@@ -1236,7 +1325,11 @@ def _place_ema_sl_for(user_id: str, broker: str, symbol: str, quantity: int,
     ema = compute_ema10(symbol, exchange_segment)
     if ema is None:
         return (None, None, "EMA10: skipped (no historical data)")
-    limit_price = round(ema * 0.995, 2)
+
+    trigger_price = round_to_tick(ema)
+    limit_price = round_to_tick(ema * 0.995)
+    if limit_price >= trigger_price:
+        limit_price = round_to_tick(trigger_price - TICK_SIZE)
     try:
         if broker == "kotak_neo":
             resp = kotak_client.place_order(
@@ -1244,7 +1337,7 @@ def _place_ema_sl_for(user_id: str, broker: str, symbol: str, quantity: int,
                 transaction_type="S", quantity=quantity,
                 order_type="SL", product=product,
                 exchange_segment=exchange_segment,
-                price=str(limit_price), trigger_price=str(ema),
+                price=str(limit_price), trigger_price=str(trigger_price),
             )
             oid = (resp or {}).get("nOrdNo") or (resp or {}).get("orderId")
         elif broker == "dhan":
@@ -1253,7 +1346,7 @@ def _place_ema_sl_for(user_id: str, broker: str, symbol: str, quantity: int,
                 transaction_type="S", quantity=quantity,
                 order_type="SL", product=product,
                 exchange_segment="NSE_EQ" if exchange_segment.lower().startswith("nse") else "BSE_EQ",
-                price=limit_price, trigger_price=ema,
+                price=limit_price, trigger_price=trigger_price,
             )
             oid = resp.get("order_id")
         elif broker == "alice_blue":
@@ -1262,7 +1355,7 @@ def _place_ema_sl_for(user_id: str, broker: str, symbol: str, quantity: int,
                 transaction_type="S", quantity=quantity,
                 order_type="SL", product=product,
                 exchange=("NSE" if exchange_segment.lower().startswith("nse") else "BSE"),
-                price=limit_price, trigger_price=ema,
+                price=limit_price, trigger_price=trigger_price,
             )
             oid = resp.get("order_id")
         elif broker == "indmoney":
@@ -1271,12 +1364,12 @@ def _place_ema_sl_for(user_id: str, broker: str, symbol: str, quantity: int,
                 transaction_type="S", quantity=quantity,
                 order_type="SL", product=product,
                 exchange_segment=("NSE" if exchange_segment.lower().startswith("nse") else "BSE"),
-                price=limit_price, trigger_price=ema,
+                price=limit_price, trigger_price=trigger_price,
             )
             oid = resp.get("order_id")
         else:
             return (ema, None, f"EMA10: unsupported broker '{broker}'")
-        return (ema, oid, f"EMA10 SL placed @ {ema} (limit {limit_price})")
+        return (ema, oid, f"EMA10 SL placed @ {trigger_price} (limit {limit_price})")
     except (kotak_client.KotakError, dhan_client.DhanError, alice_client.AliceError, indmoney_client.IndMoneyError) as e:
         return (ema, None, f"EMA10 SL failed: {e}")
     except Exception as e:
@@ -1420,46 +1513,47 @@ async def ema_preview(symbol: str, exchange_segment: str = "nse_cm"):
     """Return the latest EMA10 for a symbol — used by the manual order UI
     to preview the stoploss trigger before placing the order."""
     ema = compute_ema10(symbol, exchange_segment)
+    trigger = round_to_tick(ema) if ema else None
+    sl_limit = round_to_tick(ema * 0.995) if ema else None
     return {"symbol": symbol.upper(), "exchange_segment": exchange_segment,
-            "ema10": ema, "sl_trigger": ema,
-            "sl_limit": round(ema * 0.995, 2) if ema else None}
+            "ema10": ema, "sl_trigger": trigger,
+            "sl_limit": sl_limit}
 
 
 # =============================================================================
 # EMA10 STOPLOSS RUN
 # =============================================================================
 
-@api.post("/ema-sl/run")
-async def ema_sl_run(user: User = Depends(require_user)):
-    connected = {
-        "kotak_neo": kotak_client.is_authenticated(user.user_id),
-        "dhan": dhan_client.is_authenticated(user.user_id),
-        "alice_blue": alice_client.is_authenticated(user.user_id),
-        "indmoney": indmoney_client.is_authenticated(user.user_id),
-    }
-    if not any(connected.values()):
-        raise HTTPException(status_code=400, detail="No broker authenticated. Connect at least one.")
+async def _run_ema_sl_for_user(user_id: str, connected: Optional[dict] = None) -> dict:
+    """Core EMA SL logic — shared by POST /ema-sl/run and the background scheduler."""
+    if connected is None:
+        connected = {
+            "kotak_neo": kotak_client.is_authenticated(user_id),
+            "dhan": dhan_client.is_authenticated(user_id),
+            "alice_blue": alice_client.is_authenticated(user_id),
+            "indmoney": indmoney_client.is_authenticated(user_id),
+        }
 
     # Aggregate positions across all connected brokers
     all_positions: List[dict] = []
-    if connected["kotak_neo"]:
+    if connected.get("kotak_neo"):
         try:
-            all_positions.extend(_normalise_positions(kotak_client.get_positions(user.user_id)))
+            all_positions.extend(_normalise_positions(kotak_client.get_positions(user_id)))
         except Exception as e:
             logger.warning("kotak positions fetch failed: %s", e)
-    if connected["dhan"]:
+    if connected.get("dhan"):
         try:
-            all_positions.extend(dhan_client.get_positions(user.user_id))
+            all_positions.extend(dhan_client.get_positions(user_id))
         except Exception as e:
             logger.warning("dhan positions fetch failed: %s", e)
-    if connected["alice_blue"]:
+    if connected.get("alice_blue"):
         try:
-            all_positions.extend(alice_client.get_positions(user.user_id))
+            all_positions.extend(alice_client.get_positions(user_id))
         except Exception as e:
             logger.warning("alice positions fetch failed: %s", e)
-    if connected["indmoney"]:
+    if connected.get("indmoney"):
         try:
-            all_positions.extend(indmoney_client.get_positions(user.user_id))
+            all_positions.extend(indmoney_client.get_positions(user_id))
         except Exception as e:
             logger.warning("indmoney positions fetch failed: %s", e)
 
@@ -1472,7 +1566,7 @@ async def ema_sl_run(user: User = Depends(require_user)):
         broker = pos.get("broker", "kotak_neo")
         ema = compute_ema10(sym, pos.get("exchange_segment", "nse_cm"))
         run = EmaSlRun(
-            user_id=user.user_id,
+            user_id=user_id,
             symbol=f"{sym} [{broker}]",
             quantity=pos["quantity"],
             ema10=ema,
@@ -1484,10 +1578,13 @@ async def ema_sl_run(user: User = Depends(require_user)):
             run.message = "Could not fetch historical data for EMA10"
         else:
             try:
-                limit_price = round(ema * 0.995, 2)
+                trigger_price = round_to_tick(ema)
+                limit_price = round_to_tick(ema * 0.995)
+                if limit_price >= trigger_price:
+                    limit_price = round_to_tick(trigger_price - TICK_SIZE)
                 if broker == "kotak_neo":
                     resp = kotak_client.place_order(
-                        user_id=user.user_id,
+                        user_id=user_id,
                         trading_symbol=sym,
                         transaction_type="S",
                         quantity=pos["quantity"],
@@ -1495,39 +1592,39 @@ async def ema_sl_run(user: User = Depends(require_user)):
                         product=pos.get("product") or "CNC",
                         exchange_segment=pos.get("exchange_segment", "nse_cm"),
                         price=str(limit_price),
-                        trigger_price=str(ema),
+                        trigger_price=str(trigger_price),
                     )
                     run.order_id = (resp or {}).get("nOrdNo") or (resp or {}).get("orderId")
                 elif broker == "dhan":
                     resp = dhan_client.place_order(
-                        user_id=user.user_id, symbol=sym,
+                        user_id=user_id, symbol=sym,
                         transaction_type="S", quantity=pos["quantity"],
                         order_type="SL", product=pos.get("product") or "CNC",
                         exchange_segment=pos.get("exchange_segment", "NSE_EQ"),
-                        price=limit_price, trigger_price=ema,
+                        price=limit_price, trigger_price=trigger_price,
                         security_id=pos.get("security_id"),
                     )
                     run.order_id = resp.get("order_id")
                 elif broker == "alice_blue":
                     resp = alice_client.place_order(
-                        user_id=user.user_id, symbol=sym,
+                        user_id=user_id, symbol=sym,
                         transaction_type="S", quantity=pos["quantity"],
                         order_type="SL", product=pos.get("product") or "CNC",
                         exchange=("NSE" if str(pos.get("exchange_segment", "NSE")).upper().startswith("NSE") else "BSE"),
-                        price=limit_price, trigger_price=ema,
+                        price=limit_price, trigger_price=trigger_price,
                     )
                     run.order_id = resp.get("order_id")
                 elif broker == "indmoney":
                     resp = indmoney_client.place_order(
-                        user_id=user.user_id, symbol=sym,
+                        user_id=user_id, symbol=sym,
                         transaction_type="S", quantity=pos["quantity"],
                         order_type="SL", product=pos.get("product") or "CNC",
                         exchange_segment=("NSE" if str(pos.get("exchange_segment", "NSE")).upper().startswith("NSE") else "BSE"),
-                        price=limit_price, trigger_price=ema,
+                        price=limit_price, trigger_price=trigger_price,
                     )
                     run.order_id = resp.get("order_id")
                 run.status = "placed"
-                run.message = f"SL placed at {ema} (limit {limit_price}) on {broker}"
+                run.message = f"SL placed at {trigger_price} (limit {limit_price}) on {broker}"
             except (kotak_client.KotakError, dhan_client.DhanError, alice_client.AliceError, indmoney_client.IndMoneyError) as e:
                 run.status = "error"
                 run.message = str(e)
@@ -1539,7 +1636,7 @@ async def ema_sl_run(user: User = Depends(require_user)):
         await db.ema_sl_runs.insert_one(rdoc)
 
         tl = TradeLog(
-            user_id=user.user_id,
+            user_id=user_id,
             symbol=sym,
             quantity=run.quantity,
             price=ema,
@@ -1558,6 +1655,19 @@ async def ema_sl_run(user: User = Depends(require_user)):
     return {"ok": True, "count": len(runs), "runs": runs, "ran_at": now_iso}
 
 
+@api.post("/ema-sl/run")
+async def ema_sl_run(user: User = Depends(require_user)):
+    connected = {
+        "kotak_neo": kotak_client.is_authenticated(user.user_id),
+        "dhan": dhan_client.is_authenticated(user.user_id),
+        "alice_blue": alice_client.is_authenticated(user.user_id),
+        "indmoney": indmoney_client.is_authenticated(user.user_id),
+    }
+    if not any(connected.values()):
+        raise HTTPException(status_code=400, detail="No broker authenticated. Connect at least one.")
+    return await _run_ema_sl_for_user(user.user_id, connected)
+
+
 @api.get("/ema-sl/logs")
 async def list_ema_logs(user: User = Depends(require_user), limit: int = 50):
     cur = (
@@ -1566,6 +1676,84 @@ async def list_ema_logs(user: User = Depends(require_user), limit: int = 50):
         .limit(limit)
     )
     return {"logs": [c async for c in cur]}
+
+
+# ---------------------------------------------------------------------------
+# EMA SCHEDULE
+# ---------------------------------------------------------------------------
+
+@api.get("/ema-sl/schedule")
+async def get_ema_schedule(user: User = Depends(require_user)):
+    doc = await db.ema_schedules.find_one({"user_id": user.user_id}, {"_id": 0})
+    return {"schedule": doc if doc else None}
+
+
+@api.post("/ema-sl/schedule")
+async def set_ema_schedule(payload: EmaScheduleInput, user: User = Depends(require_user)):
+    now = datetime.now(timezone.utc)
+    interval = payload.interval
+    if interval not in ("1h", "2h", "daily"):
+        raise HTTPException(status_code=400, detail="interval must be 1h, 2h, or daily")
+    next_run = _calc_next_run(interval, now)
+    await db.ema_schedules.update_one(
+        {"user_id": user.user_id},
+        {"$set": {
+            "user_id": user.user_id,
+            "interval": interval,
+            "enabled": payload.enabled,
+            "next_run_at": next_run.isoformat(),
+            "created_at": now.isoformat(),
+        }},
+        upsert=True,
+    )
+    return {"ok": True, "next_run_at": next_run.isoformat()}
+
+
+@api.delete("/ema-sl/schedule")
+async def delete_ema_schedule(user: User = Depends(require_user)):
+    await db.ema_schedules.delete_one({"user_id": user.user_id})
+    return {"ok": True}
+
+
+def _calc_next_run(interval: str, now: datetime) -> datetime:
+    """Compute the next run time for a given interval."""
+    if interval == "1h":
+        return (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    elif interval == "2h":
+        return (now + timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
+    else:  # daily
+        nxt = (now + timedelta(days=1)).replace(hour=9, minute=15, second=0, microsecond=0)
+        # If today's market hasn't started yet, schedule for today
+        today_915 = now.replace(hour=9, minute=15, second=0, microsecond=0)
+        if now < today_915:
+            return today_915
+        return nxt
+
+
+async def _ema_scheduler_loop():
+    """Background loop: checks MongoDB every 30s for due EMA schedules."""
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            cursor = db.ema_schedules.find({"enabled": True, "next_run_at": {"$lte": now.isoformat()}}, {"_id": 0})
+            schedules = [s async for s in cursor]
+            for sched in schedules:
+                uid = sched["user_id"]
+                logger.info("[scheduler] running EMA SL for user %s", uid)
+                try:
+                    await _run_ema_sl_for_user(uid)
+                except Exception as e:
+                    logger.error("[scheduler] EMA run failed for %s: %s", uid, e)
+                # Update next run
+                nxt = _calc_next_run(sched["interval"], datetime.now(timezone.utc))
+                await db.ema_schedules.update_one(
+                    {"user_id": uid},
+                    {"$set": {"last_run_at": datetime.now(timezone.utc).isoformat(),
+                               "next_run_at": nxt.isoformat()}},
+                )
+        except Exception as e:
+            logger.error("[scheduler] loop error: %s", e)
+        await asyncio.sleep(30)
 
 
 # =============================================================================
@@ -1580,6 +1768,64 @@ async def root():
 @api.get("/health")
 async def health():
     return {"status": "healthy", "ts": datetime.now(timezone.utc).isoformat()}
+
+
+# ---------------------------------------------------------------------------
+# BACKTEST
+# ---------------------------------------------------------------------------
+
+@api.post("/backtest/run")
+async def run_backtest_endpoint(user: User = Depends(require_user), symbols: str = "", period: str = "1y"):
+    """Run the screening backtest. `symbols` is a comma-separated list;
+    if empty the default NIFTY_100 universe is scanned.
+    """
+    sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()] if symbols else None
+    return await run_backtest(sym_list, period)
+
+
+@api.post("/backtest/signals")
+async def upload_backtest_signals(user: User = Depends(require_user), request: Request = None):
+    """Upload a CSV of backtest signals (date,symbol,marketcapname,sector)
+    and evaluate the screening criteria on each signal's date.
+    """
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty body")
+    try:
+        text = body.decode("utf-8-sig")
+    except Exception:
+        raise HTTPException(status_code=400, detail="CSV must be UTF-8")
+
+    reader = csv.DictReader(io.StringIO(text))
+    signals: List[dict] = []
+    errors: List[str] = []
+    line = 1
+    for raw in reader:
+        line += 1
+        if not raw:
+            continue
+        row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items() if k}
+        dt = row.get("date", "")
+        sym = row.get("symbol", "") or row.get("ticker", "")
+        mcap = row.get("marketcapname", "") or row.get("marketcap", "") or row.get("cap", "")
+        sec = row.get("sector", "")
+        if not dt or not sym:
+            errors.append(f"line {line}: date and symbol are required")
+            continue
+        signals.append({"date": dt, "symbol": sym.upper(), "marketcapname": mcap, "sector": sec})
+
+    if not signals:
+        raise HTTPException(status_code=400, detail={"errors": errors or ["No valid rows found"]})
+
+    result = await run_signal_backtest(signals)
+    result["errors"] = errors
+    return result
+
+
+@api.get("/backtest/symbols")
+async def list_backtest_symbols(user: User = Depends(require_user)):
+    """Return the default backtest universe (NIFTY 100)."""
+    return {"symbols": NIFTY_100}
 
 
 # =============================================================================
@@ -1664,19 +1910,22 @@ app.include_router(auth_service.build_router(db), prefix="/api/auth")
 async def _startup():
     await auth_service.ensure_indexes(db)
     await auth_service.seed_admin(db)
+    _scheduler_task = asyncio.create_task(_ema_scheduler_loop())
 
 # CORS
 # IMPORTANT: when allow_credentials=True the browser rejects
 # `Access-Control-Allow-Origin: *`. We use allow_origin_regex so Starlette
 # echoes the caller's Origin header, which is the only valid combo with
 # credentials and avoids the "Login failed" loop on the Google sign-in callback.
-_cors_origins_env = os.environ.get("CORS_ORIGINS", "*").strip()
+_cors_origins_env = os.environ.get("CORS_ORIGINS", "").strip()
 _cors_kwargs = dict(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-if _cors_origins_env in ("", "*"):
+if not _cors_origins_env:
+    _cors_kwargs["allow_origin_regex"] = ".*"
+elif _cors_origins_env == "*":
     _cors_kwargs["allow_origin_regex"] = ".*"
 else:
     _cors_kwargs["allow_origins"] = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]

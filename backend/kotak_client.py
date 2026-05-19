@@ -190,11 +190,15 @@ def start_login(user_id: str, creds: dict) -> dict:
     try:
         resp = client.login(mobilenumber=creds["mobile"], password=creds["password"])
     except Exception as e:
+        logger.error("Kotak login() failed for user %s: %s", user_id, e)
         raise KotakError(f"Kotak login() failed: {e}")
+
+    logger.info("Kotak login() response for user %s: %s", user_id, _clean(resp))
 
     # Inspect response for embedded errors Kotak returns as 4xx wrapped bodies.
     err_msg = _extract_error_message(resp)
     if err_msg:
+        logger.warning("Kotak login() returned error for user %s: %s", user_id, err_msg)
         raise KotakError(f"Kotak Neo: {err_msg}")
 
     _sessions[user_id] = {"client": client, "ucc": None, "pending_2fa": True}
@@ -206,11 +210,18 @@ def _extract_error_message(resp) -> Optional[str]:
     if not isinstance(resp, dict):
         return None
     # Pattern A: {"data": {"Code": 401, "Message": "..."}}
+    # Codes can be int or string — handle both.
     data = resp.get("data")
     if isinstance(data, dict):
         code = data.get("Code") or data.get("code")
         message = data.get("Message") or data.get("message")
-        if code and isinstance(code, int) and not (200 <= code < 300) and message:
+        if code and message:
+            try:
+                code_int = int(code)
+                if 200 <= code_int < 300:
+                    return None
+            except (ValueError, TypeError):
+                pass
             return f"[{code}] {message}"
     # Pattern B: top-level Status / ErrorMessage
     if resp.get("Status") in ("Error", "error") or resp.get("error"):
@@ -231,10 +242,14 @@ def complete_2fa(user_id: str, otp: str) -> dict:
     try:
         resp = client.session_2fa(OTP=(otp or "").strip())
     except Exception as e:
+        logger.error("Kotak 2FA failed for user %s: %s", user_id, e)
         raise KotakError(f"2FA verification failed: {e}")
+
+    logger.info("Kotak 2FA response for user %s: %s", user_id, _clean(resp))
 
     err_msg = _extract_error_message(resp)
     if err_msg:
+        logger.warning("Kotak 2FA returned error for user %s: %s", user_id, err_msg)
         raise KotakError(f"Kotak Neo 2FA: {err_msg}")
 
     # Extract ucc if present

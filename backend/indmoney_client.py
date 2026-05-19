@@ -94,7 +94,7 @@ def get_positions(user_id: str) -> list:
     for p in positions:
         if not isinstance(p, dict):
             continue
-        sym = p.get("trading_symbol") or p.get("tradingsymbol") or p.get("symbol")
+        sym = (p.get("trading_symbol") or p.get("tradingsymbol") or p.get("symbol") or "UNKNOWN").upper()
         try:
             qty = int(p.get("net_qty") or p.get("quantity") or 0)
         except Exception:

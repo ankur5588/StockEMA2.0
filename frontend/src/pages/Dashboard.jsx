@@ -8,6 +8,7 @@ import INDmoneyCard from "@/components/dashboard/INDmoneyCard";
 import WebhookCard from "@/components/dashboard/WebhookCard";
 import EmaPanel from "@/components/dashboard/EmaPanel";
 import AlertsConfig from "@/components/dashboard/AlertsConfig";
+import BacktestPanel from "@/components/dashboard/BacktestPanel";
 import PositionsTable from "@/components/dashboard/PositionsTable";
 import TradeLog from "@/components/dashboard/TradeLog";
 import WebhookLog from "@/components/dashboard/WebhookLog";
@@ -109,6 +110,9 @@ export default function Dashboard({ user }) {
 
         {/* Symbol Mappings (full-width) */}
         <SymbolMappings />
+
+        {/* Backtest (full-width) */}
+        <BacktestPanel />
 
         {/* Logs */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
