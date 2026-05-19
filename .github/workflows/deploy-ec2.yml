@@ -55,8 +55,6 @@ jobs:
               --exclude "backend/.venv" \
               "$SRC_DIR"/ "$APP_DIR"/
             sudo chmod +x "$APP_DIR/deploy.sh"
-            sudo sed -i "s|^MONGO_APP_PWD=\"\\\$(cat \\\"\\\$MONGO_APP_PWD_FILE\\\")\"$|MONGO_APP_PWD=\"\$(cat \\\"\\\$MONGO_APP_PWD_FILE\\\")\"\\nMONGO_APP_PWD_ENC=\"\$(python3 -c \\\"import urllib.parse,sys; print(urllib.parse.quote_plus(sys.argv[1]))\\\" \\\"\\\$MONGO_APP_PWD\\\")\"|" "$APP_DIR/deploy.sh"
-            sudo sed -i "s|^MONGO_URL=mongodb://chartink:\\\${MONGO_APP_PWD}@127.0.0.1:27017/\\\${DB_NAME}?authSource=\\\${DB_NAME}$|MONGO_URL=mongodb://chartink:\\\${MONGO_APP_PWD_ENC}@127.0.0.1:27017/\\\${DB_NAME}?authSource=\\\${DB_NAME}|" "$APP_DIR/deploy.sh"
 
             # Use nip.io temp URL if no domain secret set
             if [ -z "${DOMAIN:-}" ]; then

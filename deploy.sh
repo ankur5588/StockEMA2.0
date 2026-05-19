@@ -68,11 +68,6 @@ log "1/12 Installing system packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -yq software-properties-common gnupg curl ca-certificates ufw git build-essential
-# Python 3.11
-add-apt-repository -y ppa:deadsnakes/ppa >/dev/null
-apt-get update -qq
-apt-get install -yq $PY_CMD $PY_CMD-venv $PY_CMD-dev
-# Node 18 + Yarn
 # Python
 PY_CMD="python3"
 if command -v python3.12 &>/dev/null; then
@@ -80,6 +75,10 @@ if command -v python3.12 &>/dev/null; then
 elif command -v $PY_CMD &>/dev/null; then
     PY_CMD=python3
 fi
+add-apt-repository -y ppa:deadsnakes/ppa >/dev/null
+apt-get update -qq
+apt-get install -yq $PY_CMD $PY_CMD-venv $PY_CMD-dev
+# Node 18 + Yarn
 if ! command -v node >/dev/null; then
     curl -fsSL https://deb.nodesource.com/setup_18.x | bash - >/dev/null
     apt-get install -yq nodejs
@@ -159,7 +158,8 @@ ok "MongoDB auth enabled. Passwords in $MONGO_APP_PWD_FILE and $MONGO_ROOT_PWD_F
 log "6/12 Writing backend/.env"
 ENV_FILE="$APP_DIR/backend/.env"
 cat > "$ENV_FILE" <<EOF
-MONGO_URL=mongodb://chartink:${MONGO_APP_PWD}@127.0.0.1:27017/${DB_NAME}?authSource=${DB_NAME}
+MONGO_APP_PWD_ENC=$($PY_CMD -c "import urllib.parse; print(urllib.parse.quote_plus('''${MONGO_APP_PWD}'''))")
+MONGO_URL=mongodb://chartink:${MONGO_APP_PWD_ENC}@127.0.0.1:27017/${DB_NAME}?authSource=${DB_NAME}
 DB_NAME=${DB_NAME}
 CORS_ORIGINS=https://${DOMAIN}
 FERNET_KEY=${FERNET_KEY}
