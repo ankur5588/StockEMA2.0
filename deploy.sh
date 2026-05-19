@@ -165,7 +165,13 @@ MONGO_APP_PWD_ENC=$($PY_CMD -c "import urllib.parse, sys; print(urllib.parse.quo
 cat > "$ENV_FILE" <<EOF
 MONGO_URL=mongodb://chartink:${MONGO_APP_PWD_ENC}@127.0.0.1:27017/${DB_NAME}?authSource=${DB_NAME}
 DB_NAME=${DB_NAME}
-CORS_ORIGINS=https://${DOMAIN}
+# Determine protocol: https for real domains, http for nip.io temp URLs
+if [[ "$DOMAIN" == *".nip.io" ]]; then
+    PROTO="http"
+else
+    PROTO="https"
+fi
+CORS_ORIGINS=${PROTO}://${DOMAIN}
 FERNET_KEY=${FERNET_KEY}
 STATIC_IP_DEPLOYMENT=true
 DEPLOYMENT_NAME=${DOMAIN}
@@ -189,9 +195,10 @@ sudo -u "$APP_USER" bash -lc "
 ok "Python deps installed"
 
 # ---------- 8. frontend build ----------
-log "8/12 Building frontend for https://$DOMAIN"
+log "8/12 Building frontend for $DOMAIN"
+# Use empty REACT_APP_BACKEND_URL so API calls go to same origin (nginx proxies /api/)
 cat > "$APP_DIR/frontend/.env" <<EOF
-REACT_APP_BACKEND_URL=https://${DOMAIN}
+REACT_APP_BACKEND_URL=
 EOF
 chown "$APP_USER:$APP_USER" "$APP_DIR/frontend/.env"
 sudo -u "$APP_USER" bash -lc "
