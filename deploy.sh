@@ -27,13 +27,14 @@ set -euo pipefail
 
 # ---------- args ----------
 DOMAIN="${1:-}"
+CONTACT_EMAIL="${2:-}"
 STATIC_IP="$(curl -s https://api.ipify.org)"
 if [[ -z "$DOMAIN" ]]; then
     DOMAIN="${STATIC_IP}.nip.io"
-    ADMIN_EMAIL="${2:-admin@${DOMAIN}}"
+    CONTACT_EMAIL="${CONTACT_EMAIL:-admin@${DOMAIN}}"
     warn "No domain provided — using nip.io temp URL: http://${DOMAIN}"
-elif [[ -z "${2:-}" ]]; then
-    ADMIN_EMAIL="admin@${DOMAIN}"
+elif [[ -z "$CONTACT_EMAIL" ]]; then
+    CONTACT_EMAIL="admin@${DOMAIN}"
 fi
 if [[ "$(id -u)" -ne 0 ]]; then
     echo "Run as root: sudo $0 ..."
@@ -167,6 +168,8 @@ if [[ "$DOMAIN" == *".nip.io" ]]; then
 else
     PROTO="https"
 fi
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@chartink.local}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin123}"
 cat > "$ENV_FILE" <<EOF
 MONGO_URL=mongodb://chartink:${MONGO_APP_PWD_ENC}@127.0.0.1:27017/${DB_NAME}?authSource=${DB_NAME}
 DB_NAME=${DB_NAME}
@@ -174,6 +177,8 @@ CORS_ORIGINS=${PROTO}://${DOMAIN}
 FERNET_KEY=${FERNET_KEY}
 STATIC_IP_DEPLOYMENT=true
 DEPLOYMENT_NAME=${DOMAIN}
+ADMIN_EMAIL=${ADMIN_EMAIL}
+ADMIN_PASSWORD=${ADMIN_PASSWORD}
 EOF
 chown "$APP_USER:$APP_USER" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
@@ -287,7 +292,7 @@ log "11/12 Checking Let's Encrypt certificate"
 if [[ "$DOMAIN" != *".nip.io" ]]; then
     if ! certbot certificates 2>/dev/null | grep -q "$DOMAIN"; then
         certbot --nginx --non-interactive --agree-tos --redirect \
-            -m "$ADMIN_EMAIL" -d "$DOMAIN"
+            -m "$CONTACT_EMAIL" -d "$DOMAIN"
     else
         ok "Certificate already exists for $DOMAIN"
     fi
