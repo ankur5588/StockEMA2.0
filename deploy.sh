@@ -183,7 +183,7 @@ ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin123}"
 cat > "$ENV_FILE" <<EOF
 MONGO_URL=mongodb://chartink:${MONGO_APP_PWD_ENC}@127.0.0.1:27017/${DB_NAME}?authSource=${DB_NAME}
 DB_NAME=${DB_NAME}
-CORS_ORIGINS=${PROTO}://${DOMAIN}
+CORS_ORIGINS=${PROTO}://${DOMAIN},${PROTO}://www.${DOMAIN}
 FERNET_KEY=${FERNET_KEY}
 JWT_SECRET=${JWT_SECRET}
 STATIC_IP_DEPLOYMENT=true
@@ -267,7 +267,7 @@ NGX_FILE="/etc/nginx/sites-available/chartink"
 cat > "$NGX_FILE" <<EOF
 server {
     listen 80;
-    server_name ${DOMAIN};
+    server_name ${DOMAIN} www.${DOMAIN};
 
     # Serve React build
     root $APP_DIR/frontend/build;
@@ -303,7 +303,7 @@ log "11/12 Checking Let's Encrypt certificate"
 if [[ "$DOMAIN" != *".nip.io" ]]; then
     if ! certbot certificates 2>/dev/null | grep -q "$DOMAIN"; then
         certbot --nginx --non-interactive --agree-tos --redirect \
-            -m "$CONTACT_EMAIL" -d "$DOMAIN"
+            -m "$CONTACT_EMAIL" -d "$DOMAIN" -d "www.$DOMAIN"
     else
         ok "Certificate already exists for $DOMAIN"
     fi
