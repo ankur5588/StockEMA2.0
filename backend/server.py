@@ -1074,7 +1074,7 @@ async def upload_symbol_mappings_csv(request: Request, user: User = Depends(requ
         qty_raw = row.get("quantity") or row.get("qty") or ""
         amt_raw = row.get("amount") or row.get("amt") or ""
         broker = (row.get("broker") or "*").lower() or "*"
-        if broker not in ("kotak_neo", "dhan", "alice_blue", "indmoney", "*"):
+        if broker not in ("kotak_neo", "dhan", "alice_blue", "indmoney", "delta_exchange", "*"):
             errors.append(f"line {line}: invalid broker '{broker}'")
             continue
         try:
@@ -1484,7 +1484,7 @@ async def place_manual_order(payload: ManualOrderInput, user: User = Depends(req
       amo (bool), auto_ema_sl (bool — places a SL-SELL after a long entry only).
     """
     broker = payload.broker
-    if broker not in ("kotak_neo", "dhan", "alice_blue", "indmoney"):
+    if broker not in ("kotak_neo", "dhan", "alice_blue", "indmoney", "delta_exchange"):
         raise HTTPException(status_code=400, detail=f"Unsupported broker '{broker}'")
 
     # Place the main order
@@ -1775,6 +1775,7 @@ async def ema_sl_run(user: User = Depends(require_user)):
         "dhan": dhan_client.is_authenticated(user.user_id),
         "alice_blue": alice_client.is_authenticated(user.user_id),
         "indmoney": indmoney_client.is_authenticated(user.user_id),
+        "delta_exchange": delta_client.is_authenticated(user.user_id),
     }
     if not any(connected.values()):
         raise HTTPException(status_code=400, detail="No broker authenticated. Connect at least one.")

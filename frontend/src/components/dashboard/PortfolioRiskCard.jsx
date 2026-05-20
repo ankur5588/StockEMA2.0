@@ -18,6 +18,7 @@ const BROKER_LABELS = {
   dhan: "Dhan",
   alice_blue: "Alice",
   indmoney: "INDmoney",
+  delta_exchange: "Delta",
 };
 
 const inr = (n) => {
