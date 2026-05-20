@@ -126,6 +126,16 @@ if [[ ! -f "$FERNET_KEY_FILE" ]]; then
 fi
 FERNET_KEY="$(cat "$FERNET_KEY_FILE")"
 
+# ---------- 4b. JWT_SECRET ----------
+log "4b/12 Ensuring JWT_SECRET exists"
+JWT_SECRET_FILE="/root/.chartink_jwt_secret"
+if [[ ! -f "$JWT_SECRET_FILE" ]]; then
+    openssl rand -base64 32 | tr -d '\n' > "$JWT_SECRET_FILE"
+    chmod 600 "$JWT_SECRET_FILE"
+    warn "JWT_SECRET generated and saved to $JWT_SECRET_FILE"
+fi
+JWT_SECRET="$(cat "$JWT_SECRET_FILE")"
+
 # ---------- 5. MongoDB auth ----------
 log "5/12 Configuring MongoDB authentication"
 MONGO_APP_PWD_FILE="/root/.chartink_mongo_app_pwd"
@@ -175,6 +185,7 @@ MONGO_URL=mongodb://chartink:${MONGO_APP_PWD_ENC}@127.0.0.1:27017/${DB_NAME}?aut
 DB_NAME=${DB_NAME}
 CORS_ORIGINS=${PROTO}://${DOMAIN}
 FERNET_KEY=${FERNET_KEY}
+JWT_SECRET=${JWT_SECRET}
 STATIC_IP_DEPLOYMENT=true
 DEPLOYMENT_NAME=${DOMAIN}
 ADMIN_EMAIL=${ADMIN_EMAIL}
