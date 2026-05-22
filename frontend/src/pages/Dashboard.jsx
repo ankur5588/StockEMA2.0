@@ -14,7 +14,6 @@ import PositionsTable from "@/components/dashboard/PositionsTable";
 import TradeLog from "@/components/dashboard/TradeLog";
 import WebhookLog from "@/components/dashboard/WebhookLog";
 import ComplianceCard from "@/components/dashboard/ComplianceCard";
-import SymbolMappings from "@/components/dashboard/SymbolMappings";
 import ManualOrderCard from "@/components/dashboard/ManualOrderCard";
 import PortfolioRiskCard from "@/components/dashboard/PortfolioRiskCard";
 import { api } from "@/lib/api";
@@ -110,9 +109,6 @@ export default function Dashboard({ user }) {
 
         {/* Manual Order */}
         <ManualOrderCard brokersStatus={status} reload={loadStatus} />
-
-        {/* Symbol Mappings (full-width) */}
-        <SymbolMappings />
 
         {/* Backtest (full-width) */}
         <BacktestPanel />
