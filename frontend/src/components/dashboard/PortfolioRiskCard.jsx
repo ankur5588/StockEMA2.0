@@ -14,7 +14,6 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 
 const BROKER_LABELS = {
-  kotak_neo: "Kotak",
   dhan: "Dhan",
   alice_blue: "Alice",
   indmoney: "INDmoney",
@@ -66,7 +65,7 @@ export default function PortfolioRiskCard({ anyAuthenticated }) {
 
   const totals = data?.totals;
   const positions = data?.positions || [];
-  const missing = data?.positions_missing_ema || [];
+  const missing = data?.positions_missing_sl || [];
 
   return (
     <Card
@@ -84,7 +83,7 @@ export default function PortfolioRiskCard({ anyAuthenticated }) {
           </CardTitle>
           <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed max-w-2xl">
             Live exposure across all connected brokers and your downside if every
-            position's EMA10 stoploss were to trigger.
+            position's stoploss (ATR trailing / 8%) were to trigger.
           </p>
         </div>
         <Button
@@ -129,7 +128,7 @@ export default function PortfolioRiskCard({ anyAuthenticated }) {
                 icon={TrendingDown}
                 label="If SL hits"
                 value={inr(totals.sl_value)}
-                hint="∑ qty × EMA10"
+                hint="∑ qty × stop"
                 tone="muted"
                 testid="kpi-sl-value"
               />
@@ -198,7 +197,7 @@ export default function PortfolioRiskCard({ anyAuthenticated }) {
                       <Th>Broker</Th>
                       <Th className="text-right">Qty</Th>
                       <Th className="text-right">LTP</Th>
-                      <Th className="text-right">EMA10</Th>
+                      <Th className="text-right">Stop</Th>
                       <Th className="text-right">Value</Th>
                       <Th className="text-right">SL value</Th>
                       <Th className="text-right">Risk</Th>
@@ -224,7 +223,7 @@ export default function PortfolioRiskCard({ anyAuthenticated }) {
                           {inr(p.mark_price)}
                         </TableCell>
                         <TableCell className="font-mono text-xs py-2 px-3 text-right text-warn">
-                          {inr(p.ema10)}
+                          {inr(p.sl_price)}
                         </TableCell>
                         <TableCell className="font-mono text-xs py-2 px-3 text-right">
                           {inr(p.current_value)}
@@ -253,7 +252,7 @@ export default function PortfolioRiskCard({ anyAuthenticated }) {
               >
                 <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                 <div>
-                  <span className="font-medium">EMA10 unavailable</span> for{" "}
+                  <span className="font-medium">Stop unavailable</span> for{" "}
                   {missing.length} position{missing.length !== 1 ? "s" : ""} (
                   {missing.map((m) => m.symbol).join(", ")}). They are excluded
                   from the risk total.

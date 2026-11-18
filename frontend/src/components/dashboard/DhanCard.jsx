@@ -27,8 +27,9 @@ export default function DhanCard({ status, reload }) {
     e.preventDefault();
     setBusy(true);
     try {
-      await api.post("/dhan/credentials", form);
-      toast.success("Dhan credentials saved");
+      const res = await api.post("/dhan/credentials", form);
+      if (res.data?.connected) toast.success("Dhan saved and connected");
+      else toast.error(res.data?.error || "Saved, but Dhan did not connect");
       setSetupOpen(false);
       setForm({ client_id: "", access_token: "" });
       reload?.();
@@ -92,6 +93,17 @@ export default function DhanCard({ status, reload }) {
           <Stat label="Credentials" value={hasCreds ? "saved" : "missing"} tone={hasCreds ? "ok" : "warn"} />
           <Stat label="Session" value={isAuth ? "active" : "inactive"} tone={isAuth ? "ok" : "warn"} />
         </div>
+        {status?.token_expires_at && (
+          <div className="text-[10px] font-mono text-muted-foreground" data-testid="dhan-token-expiry">
+            Token valid until {new Date(status.token_expires_at).toLocaleString("en-IN", { hour12: false })}
+            {" "}(renews itself each day)
+          </div>
+        )}
+        {status?.last_error && (
+          <div className="text-[11px] text-loss border border-loss/40 bg-loss/5 rounded-sm p-2" data-testid="dhan-last-error">
+            {status.last_error}
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
@@ -149,7 +161,7 @@ export default function DhanCard({ status, reload }) {
             <DialogTitle className="font-medium tracking-tight">Dhan API Access</DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
               Generate an access token at <span className="text-white">web.dhan.co → My Profile → Access DhanHQ APIs</span>.
-              Default tokens expire every 24h unless your app is registered.
+              The app renews the token by itself every day while it is still valid. If it ever expires (for example the server was off for a day), paste a new one here.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={save} className="space-y-3 pt-2">
@@ -179,7 +191,7 @@ export default function DhanCard({ status, reload }) {
                 className="h-9 rounded-sm bg-surface-1 border-border font-mono text-xs"
               />
               <div className="text-[10px] text-muted-foreground">
-                Long JWT-like string. Regenerate daily or when expired.
+                Long JWT-like string. Only needed again if it expires.
               </div>
             </div>
             <DialogFooter className="pt-3">

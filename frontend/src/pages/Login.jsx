@@ -96,9 +96,9 @@ export default function Login() {
               In milliseconds.
             </h1>
             <p className="text-sm text-muted-foreground max-w-sm leading-relaxed">
-              Connect Kotak Neo, Dhan, Alice Blue. Route Chartink webhooks.
-              Place EMA-based stoploss orders on your open positions —
-              automatically, daily.
+              Connect Dhan, Alice Blue, INDmoney, Delta. Route Chartink webhooks.
+              Place ATR trailing + 8% stoploss orders on your open positions —
+              automatically, every weekday at 9:30 AM IST.
             </p>
             <div className="grid grid-cols-3 gap-4 pt-4">
               <Feature icon={Zap} label="Webhook" value="live" />

@@ -37,7 +37,7 @@ export default function WebhookCard({ status }) {
       <CardContent className="space-y-3">
         {!url ? (
           <div className="border border-dashed border-border p-4 rounded-sm text-xs text-muted-foreground">
-            Save Kotak credentials to generate your unique webhook URL.
+            Add your Dhan token to generate your unique webhook URL.
           </div>
         ) : (
           <>
