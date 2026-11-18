@@ -204,7 +204,6 @@ sudo -u "$APP_USER" bash -lc "
     pip install --upgrade pip wheel
     pip install -r '$APP_DIR/backend/requirements.txt'
     # SDKs not in requirements.txt (version pin conflicts)
-    pip install 'git+https://github.com/Kotak-Neo/kotak-neo-api.git'
     pip install dhanhq pya3 yfinance delta-rest-client
 "
 ok "Python deps installed"
@@ -345,7 +344,6 @@ echo "    tail -f /var/log/chartink-backend.err.log"
 echo ""
 echo "  Next — whitelist THIS IP with your brokers:"
 echo "    • Dhan        web.dhan.co → Profile → Access DhanHQ APIs → add ${STATIC_IP}"
-echo "    • Kotak Neo   Neo app → Profile → Trade API → API Dashboard → add ${STATIC_IP}"
 echo "    • Alice Blue  ant.aliceblueonline.com → Apps → add ${STATIC_IP}"
 echo ""
 echo "  Verify compliance card is GREEN after login:"

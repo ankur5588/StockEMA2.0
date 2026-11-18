@@ -18,15 +18,6 @@ class User(BaseModel):
     created_at: datetime
 
 
-class KotakCredentialsInput(BaseModel):
-    mobile: str  # e.g. +919999999999
-    password: str
-    mpin: str
-    consumer_key: str
-    consumer_secret: str
-    environment: Optional[str] = "prod"  # "prod" or "uat"
-
-
 class DhanCredentialsInput(BaseModel):
     client_id: str
     access_token: str
@@ -47,20 +38,7 @@ class DeltaCredentialsInput(BaseModel):
     environment: str = "india_prod"  # india_prod | global_prod | india_testnet | global_testnet
 
 
-BROKER_CHOICES = ("kotak_neo", "dhan", "alice_blue", "indmoney", "delta_exchange")
-
-
-class KotakStatus(BaseModel):
-    has_credentials: bool
-    is_authenticated: bool
-    ucc: Optional[str] = None
-    last_login_at: Optional[datetime] = None
-    webhook_token: Optional[str] = None
-    webhook_url: Optional[str] = None
-
-
-class KotakOtpInput(BaseModel):
-    otp: str  # OTP or MPIN-based 2FA code
+BROKER_CHOICES = ("dhan", "alice_blue", "indmoney", "delta_exchange")
 
 
 class AlertConfigInput(BaseModel):
@@ -70,7 +48,7 @@ class AlertConfigInput(BaseModel):
     quantity: int = 1
     exchange_segment: str = "nse_cm"
     product: str = "CNC"
-    broker: str = "kotak_neo"  # which broker to route to
+    broker: str = "dhan"  # which broker to route to
 
 
 class SymbolMappingInput(BaseModel):
@@ -164,8 +142,12 @@ class EmaSlRun(BaseModel):
     user_id: str
     symbol: str
     quantity: int
-    ema10: Optional[float] = None
+    ema10: Optional[float] = None   # legacy rows only
     sl_trigger: Optional[float] = None
+    atr: Optional[float] = None
+    atr_stop: Optional[float] = None
+    fixed_stop: Optional[float] = None
+    basis: Optional[str] = None     # atr | fixed | previous
     order_id: Optional[str] = None
     status: str
     message: Optional[str] = None
@@ -174,7 +156,7 @@ class EmaSlRun(BaseModel):
 
 class ManualOrderInput(BaseModel):
     """Used by the dashboard 'place order manually' form."""
-    broker: str = "kotak_neo"  # kotak_neo | dhan | alice_blue
+    broker: str = "dhan"  # dhan | alice_blue | indmoney | delta_exchange
     symbol: str
     transaction_type: str = "B"  # B | S
     quantity: int = Field(..., gt=0)

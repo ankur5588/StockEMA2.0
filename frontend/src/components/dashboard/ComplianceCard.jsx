@@ -127,7 +127,7 @@ export default function ComplianceCard() {
               This deployment uses a pooled outbound IP. To comply with SEBI
               algo-trading rules, self-host on a VPS with a reserved static IP
               (DigitalOcean Reserved IP, AWS Elastic IP, Linode, Hetzner), then
-              whitelist it with Kotak Neo. See <code className="text-white">README.md</code>.
+              whitelist it with your broker (Dhan). See <code className="text-white">README.md</code>.
             </p>
           </div>
         ) : (
@@ -137,7 +137,7 @@ export default function ComplianceCard() {
           >
             <p className="text-xs text-muted-foreground leading-relaxed">
               <span className="text-profit font-medium">Static IP detected.</span>{" "}
-              Whitelist the IP above with Kotak Neo and register per SEBI
+              Whitelist the IP above with your broker (Dhan) and register per SEBI
               algo-trading requirements.
             </p>
           </div>

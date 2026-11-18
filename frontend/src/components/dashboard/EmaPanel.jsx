@@ -12,8 +12,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-export default function EmaPanel({ kotakAuthenticated }) {
-  const anyAuth = !!kotakAuthenticated;
+export default function EmaPanel({ anyAuthenticated }) {
+  const anyAuth = !!anyAuthenticated;
   const [logs, setLogs] = useState([]);
   const [running, setRunning] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -49,12 +49,12 @@ export default function EmaPanel({ kotakAuthenticated }) {
     try {
       const res = await api.post("/ema-sl/run");
       toast.success(
-        `EMA10 SL run completed \u2014 ${res.data.count} position(s) processed`
+        `Stoploss run completed \u2014 ${res.data.count} position(s) processed`
       );
       setConfirming(false);
       load();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "EMA SL run failed");
+      toast.error(err?.response?.data?.detail || "Stoploss run failed");
     } finally {
       setRunning(false);
     }
@@ -99,14 +99,14 @@ export default function EmaPanel({ kotakAuthenticated }) {
         </div>
         <CardTitle className="text-lg font-medium flex items-center gap-2">
           <Zap className="w-4 h-4 text-warn" />
-          EMA10 Stoploss
+          Stoploss: ATR trailing + 8%
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Pulls your open positions from brokers, computes EMA10 on daily
-          closes, and places SL orders at the EMA10 trigger for each long
-          position.
+          Runs every weekday at 9:30 AM IST. For each long position it sets one
+          stoploss at the higher of: ATR trailing stop (22-day high close minus
+          2 x ATR14, only moves up) and 8% below your entry price.
         </p>
 
         {/* --- Manual run --- */}
@@ -118,7 +118,7 @@ export default function EmaPanel({ kotakAuthenticated }) {
             className="w-full h-10 rounded-sm bg-warn text-black hover:bg-warn/90 font-medium text-xs uppercase tracking-[0.12em]"
           >
             <Siren className="w-3.5 h-3.5 mr-2" />
-            Run EMA10 SL Now
+            Run Stoploss Now
           </Button>
         ) : (
           <div className="space-y-2 border border-warn/50 bg-warn/5 p-3 rounded-sm">
@@ -159,7 +159,7 @@ export default function EmaPanel({ kotakAuthenticated }) {
           {schedule && schedule.enabled ? (
             <div className="flex items-center gap-2">
               <span className="text-xs font-mono text-profit">
-                Active: {schedule.interval === "daily" ? "Every day at 9:15" : `Every ${schedule.interval}`}
+                Active: {schedule.interval === "daily" ? "Every weekday at 9:30 AM IST" : `Every ${schedule.interval}`}
               </span>
               <span className="text-[10px] text-muted-foreground">
                 (next: {new Date(schedule.next_run_at).toLocaleString("en-IN", { hour12: false })})
@@ -181,7 +181,7 @@ export default function EmaPanel({ kotakAuthenticated }) {
               <SelectContent>
                 <SelectItem value="1h">Every 1 hour</SelectItem>
                 <SelectItem value="2h">Every 2 hours</SelectItem>
-                <SelectItem value="daily">Daily at 9:15</SelectItem>
+                <SelectItem value="daily">Weekdays at 9:30 AM IST</SelectItem>
               </SelectContent>
             </Select>
             <Button size="sm" onClick={saveSchedule} disabled={savingSchedule}
@@ -217,7 +217,7 @@ export default function EmaPanel({ kotakAuthenticated }) {
                   <span className="flex-1 truncate">{l.symbol}</span>
                   <span className="text-muted-foreground">\u00d7{l.quantity}</span>
                   <span className="text-warn">
-                    EMA10 {l.ema10 ?? "\u2014"}
+                    SL {l.sl_trigger ?? "\u2014"}{l.basis ? ` (${l.basis})` : ""}
                   </span>
                   <span
                     className={`text-[10px] uppercase ${

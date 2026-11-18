@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import Header from "@/components/layout/Header";
 import LiveBanner from "@/components/layout/LiveBanner";
-import ConnectionCard from "@/components/dashboard/ConnectionCard";
 import DhanCard from "@/components/dashboard/DhanCard";
 import AliceBlueCard from "@/components/dashboard/AliceBlueCard";
 import INDmoneyCard from "@/components/dashboard/INDmoneyCard";
@@ -36,17 +35,11 @@ export default function Dashboard({ user }) {
     return () => clearInterval(t);
   }, [loadStatus]);
 
-  // Wrap the Kotak-shape status so the existing Kotak card keeps working.
-  const kotakStatus = status
-    ? {
-        ...(status.kotak_neo || {}),
-        webhook_token: status.webhook_token,
-        webhook_url: status.webhook_url,
-      }
+  const webhookStatus = status
+    ? { webhook_token: status.webhook_token, webhook_url: status.webhook_url }
     : null;
 
   const anyAuth =
-    !!status?.kotak_neo?.is_authenticated ||
     !!status?.dhan?.is_authenticated ||
     !!status?.alice_blue?.is_authenticated ||
     !!status?.indmoney?.is_authenticated ||
@@ -80,8 +73,7 @@ export default function Dashboard({ user }) {
           <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-semibold mb-3">
             / brokers
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <ConnectionCard status={kotakStatus} reload={loadStatus} />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <DhanCard status={status?.dhan} reload={loadStatus} />
             <AliceBlueCard status={status?.alice_blue} reload={loadStatus} />
             <INDmoneyCard status={status?.indmoney} reload={loadStatus} />
@@ -91,8 +83,8 @@ export default function Dashboard({ user }) {
 
         {/* Ops row */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <WebhookCard status={kotakStatus} />
-          <EmaPanel kotakAuthenticated={anyAuth} />
+          <WebhookCard status={webhookStatus} />
+          <EmaPanel anyAuthenticated={anyAuth} />
           <ComplianceCard />
         </div>
 

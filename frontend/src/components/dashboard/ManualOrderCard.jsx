@@ -16,7 +16,6 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 
 const BROKERS = [
-  { value: "kotak_neo", label: "Kotak Neo" },
   { value: "dhan", label: "Dhan" },
   { value: "alice_blue", label: "Alice Blue" },
   { value: "indmoney", label: "INDmoney" },
@@ -40,7 +39,7 @@ const PRODUCTS = [
 ];
 
 const blank = {
-  broker: "kotak_neo",
+  broker: "dhan",
   symbol: "",
   transaction_type: "B",
   quantity: "",
@@ -85,11 +84,11 @@ export default function ManualOrderCard({ brokersStatus, reload }) {
         `/ema-preview/${encodeURIComponent(form.symbol.trim().toUpperCase())}?exchange_segment=${form.exchange_segment}`
       );
       setEmaPreview(res.data);
-      if (res.data?.ema10 == null) {
+      if (res.data?.stop == null) {
         toast.error("No historical data available for this symbol");
       }
     } catch (e) {
-      toast.error("Failed to fetch EMA10");
+      toast.error("Failed to compute stop");
     } finally {
       setPreviewing(false);
     }
@@ -125,7 +124,7 @@ export default function ManualOrderCard({ brokersStatus, reload }) {
         toast.success(
           `Order placed${
             data.ema_sl?.status === "placed"
-              ? ` + EMA SL @ ₹${data.ema_sl.ema10}`
+              ? ` + SL @ ₹${data.ema_sl.stop}`
               : data.ema_sl?.status === "skipped"
               ? ` (SL: ${data.ema_sl.message})`
               : ""
@@ -171,8 +170,8 @@ export default function ManualOrderCard({ brokersStatus, reload }) {
         <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
           Place a market or limit order on any connected broker. Toggle{" "}
           <span className="text-white">After-market</span> to queue it for the
-          next session, or <span className="text-white">Auto EMA10 SL</span> to
-          automatically attach a stoploss-sell at the EMA10 trigger.
+          next session, or <span className="text-white">Auto stoploss</span> to
+          automatically attach a stoploss-sell (ATR trailing + 8%).
         </p>
       </CardHeader>
       <CardContent>
@@ -282,10 +281,10 @@ export default function ManualOrderCard({ brokersStatus, reload }) {
             />
             <ToggleBlock
               icon={ShieldAlert}
-              title="Auto EMA10 stoploss"
+              title="Auto stoploss (ATR + 8%)"
               hint={
                 sideIsBuy
-                  ? "After a BUY fill, place a SL-Sell at the daily EMA10."
+                  ? "After a BUY fill, place a SL-Sell at the higher of ATR trailing stop and 8% below entry."
                   : "Only applies to BUY entries — disabled for SELL."
               }
               checked={form.auto_ema_sl && sideIsBuy}
@@ -315,7 +314,7 @@ export default function ManualOrderCard({ brokersStatus, reload }) {
                 ) : (
                   <>
                     <TrendingUp className="w-3.5 h-3.5 mr-1.5" />
-                    Preview EMA10
+                    Preview stop
                   </>
                 )}
               </Button>
@@ -324,14 +323,14 @@ export default function ManualOrderCard({ brokersStatus, reload }) {
                   className="flex-1 grid grid-cols-3 gap-3 text-[11px] font-mono"
                   data-testid="mo-ema-preview"
                 >
-                  <PreviewCell label="EMA10" value={emaPreview.ema10 ? `₹${emaPreview.ema10}` : "—"} />
+                  <PreviewCell label="ATR stop" value={emaPreview.atr_stop ? `₹${emaPreview.atr_stop}` : "—"} />
                   <PreviewCell label="SL trigger" value={emaPreview.sl_trigger ? `₹${emaPreview.sl_trigger}` : "—"} accent="text-loss" />
                   <PreviewCell label="SL limit" value={emaPreview.sl_limit ? `₹${emaPreview.sl_limit}` : "—"} />
                 </div>
               )}
               {!emaPreview && (
                 <p className="text-[11px] text-muted-foreground">
-                  EMA10 is computed from yfinance daily closes — last 3 months.
+                  ATR(14) from yfinance daily bars, last 6 months. The 8% stop uses the last close as entry.
                 </p>
               )}
             </div>

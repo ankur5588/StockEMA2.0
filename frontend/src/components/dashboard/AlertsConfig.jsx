@@ -22,7 +22,7 @@ export default function AlertsConfig() {
     quantity: 1,
     exchange_segment: "nse_cm",
     product: "CNC",
-    broker: "kotak_neo",
+    broker: "dhan",
   });
   const [busy, setBusy] = useState(false);
 
@@ -117,7 +117,6 @@ export default function AlertsConfig() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="kotak_neo">Kotak</SelectItem>
                 <SelectItem value="dhan">Dhan</SelectItem>
                 <SelectItem value="alice_blue">Alice</SelectItem>
                 <SelectItem value="indmoney">INDmoney</SelectItem>
@@ -217,7 +216,7 @@ export default function AlertsConfig() {
                   {a.alert_name}
                 </span>
                 <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-sm border border-border bg-surface-1 text-muted-foreground uppercase tracking-wider">
-                  {a.broker === "kotak_neo" ? "Kotak" : a.broker === "dhan" ? "Dhan" : a.broker === "alice_blue" ? "Alice" : a.broker === "indmoney" ? "INDmoney" : a.broker === "delta_exchange" ? "Delta" : (a.broker || "—")}
+                  {a.broker === "dhan" ? "Dhan" : a.broker === "alice_blue" ? "Alice" : a.broker === "indmoney" ? "INDmoney" : a.broker === "delta_exchange" ? "Delta" : (a.broker || "—")}
                 </span>
                 <span
                   className={`font-mono text-[10px] px-2 py-0.5 rounded-sm border ${

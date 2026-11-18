@@ -13,7 +13,7 @@ export default function LiveBanner() {
           LIVE TRADING
         </span>
         <span className="text-black/80">
-          · Orders placed via webhooks and EMA SL runs hit your real Kotak Neo
+          · Orders placed via webhooks and stoploss runs hit your real Dhan
           account.
         </span>
       </div>
