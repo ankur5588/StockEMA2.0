@@ -15,6 +15,7 @@ import WebhookLog from "@/components/dashboard/WebhookLog";
 import ComplianceCard from "@/components/dashboard/ComplianceCard";
 import ManualOrderCard from "@/components/dashboard/ManualOrderCard";
 import PortfolioRiskCard from "@/components/dashboard/PortfolioRiskCard";
+import RegimeCard from "@/components/dashboard/RegimeCard";
 import { api } from "@/lib/api";
 
 export default function Dashboard({ user }) {
@@ -95,6 +96,9 @@ export default function Dashboard({ user }) {
           </div>
           <AlertsConfig />
         </div>
+
+        {/* Market kill switch */}
+        <RegimeCard />
 
         {/* Portfolio Risk (full-width) */}
         <PortfolioRiskCard anyAuthenticated={anyAuth} />

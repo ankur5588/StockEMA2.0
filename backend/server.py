@@ -28,6 +28,7 @@ import indmoney_client
 import delta_client
 import auth_service
 import stoploss_service as sl_svc
+import regime_service as regime
 from backtest_service import run_backtest, run_signal_backtest, NIFTY_100
 from models import (
     AlertConfig,
@@ -1100,15 +1101,19 @@ async def chartink_webhook(token: str, request: Request):
                 order_txn = alert_name_side
                 mapping_note += f" [auto-side from name: {'BUY' if alert_name_side == 'B' else 'SELL'}]"
 
-            status, order_id, msg = _route_order(
-                user_id=user_id,
-                broker=broker,
-                symbol=order_symbol,
-                transaction_type=order_txn,
-                quantity=order_qty,
-                product=order_product,
-                exchange_segment=cfg_doc.get("exchange_segment", "nse_cm"),
-            )
+            blocked = await _buys_blocked(user_id) if str(order_txn).upper() in ("B", "BUY") else None
+            if blocked:
+                status, order_id, msg = "skipped", None, blocked
+            else:
+                status, order_id, msg = _route_order(
+                    user_id=user_id,
+                    broker=broker,
+                    symbol=order_symbol,
+                    transaction_type=order_txn,
+                    quantity=order_qty,
+                    product=order_product,
+                    exchange_segment=cfg_doc.get("exchange_segment", "nse_cm"),
+                )
             if status == "success":
                 placed_any = True
             tl = TradeLog(
@@ -1236,6 +1241,11 @@ async def place_manual_order(payload: ManualOrderInput, user: User = Depends(req
     broker = payload.broker
     if broker not in ("dhan", "alice_blue", "indmoney", "delta_exchange"):
         raise HTTPException(status_code=400, detail=f"Unsupported broker '{broker}'")
+
+    if str(payload.transaction_type).upper() in ("B", "BUY"):
+        blocked = await _buys_blocked(user.user_id)
+        if blocked:
+            raise HTTPException(status_code=400, detail=blocked)
 
     # Place the main order
     status, order_id, msg = _route_order(
@@ -1532,6 +1542,11 @@ async def _run_ema_sl_for_user(user_id: str, connected: Optional[dict] = None) -
     Per long position: stop = max(ATR trailing stop, 8% below entry, previous stop).
     Dhan: updates today's open SL order if present, else places one.
     """
+    ks = await db.regime_settings.find_one({"user_id": user_id}, {"_id": 0, "last_kill_date": 1})
+    if ks and ks.get("last_kill_date") == regime.today_ist():
+        return {"ok": True, "count": 0, "runs": [], "errors": {},
+                "skipped": "Kill switch sold the portfolio today - no new stoplosses",
+                "ran_at": datetime.now(timezone.utc).isoformat()}
     errors: dict = {}
     err = await _ensure_dhan(user_id)
     if err and (await db.dhan_credentials.find_one({"user_id": user_id}, {"_id": 1})):
@@ -1731,6 +1746,7 @@ async def _ema_scheduler_loop():
     while True:
         try:
             now = datetime.now(timezone.utc)
+            await _regime_scheduler_tick()
             async for doc in db.dhan_credentials.find({}, {"_id": 0}):
                 try:
                     await _renew_dhan_if_needed(doc)
@@ -1762,6 +1778,239 @@ async def _ema_scheduler_loop():
         except Exception as e:
             logger.error("[scheduler] loop error: %s", e)
         await asyncio.sleep(30)
+
+
+# =============================================================================
+# PORTFOLIO KILL SWITCH (Nifty 20-day avg below 50-day avg)
+# =============================================================================
+#  - Checked every weekday 09:20 IST on completed daily bars.
+#  - mode "alert": only records an alert.  mode "live": cancels stoplosses and
+#    sells every equity position once, when the signal TURNS negative.
+#  - block_buys: while the signal is negative, new BUY orders are refused.
+#  - Enabling it never sells by itself: it takes the current signal as the
+#    starting point and acts only on a fresh turn to negative.
+
+class RegimeSettingsInput(BaseModel):
+    enabled: bool = False
+    mode: str = "alert"            # alert | live
+    block_buys: bool = True
+    confirm_live: bool = False     # must be true when switching to live
+
+
+async def _regime_event(user_id: str, kind: str, message: str, **extra) -> None:
+    doc = {"user_id": user_id, "kind": kind, "message": message,
+           "created_at": datetime.now(timezone.utc).isoformat(), **extra}
+    await db.regime_events.insert_one(doc)
+    logger.info("[regime] %s %s: %s", user_id, kind, message)
+
+
+async def _buys_blocked(user_id: str) -> Optional[str]:
+    """Reason text if new buys must be refused for this user, else None."""
+    st = await db.regime_settings.find_one({"user_id": user_id}, {"_id": 0})
+    if st and st.get("enabled") and st.get("block_buys") and st.get("last_signal") == "negative":
+        return ("Blocked by market signal: Nifty 20-day average is below its 50-day average "
+                f"(as of {st.get('as_of')}). New buys resume when it turns positive.")
+    return None
+
+
+_KILL_SKIP_BROKERS = {"delta_exchange"}      # crypto: not part of the Nifty signal
+
+
+def _is_equity_position(pos: dict) -> bool:
+    if pos.get("broker") in _KILL_SKIP_BROKERS:
+        return False
+    seg = str(pos.get("exchange_segment") or "").lower()
+    return not any(x in seg for x in ("fno", "nfo", "bfo", "fo_", "_fo", "crypto", "mcx", "cds"))
+
+
+async def _collect_positions(user_id: str) -> tuple[List[dict], dict]:
+    fetchers = {
+        "dhan": dhan_client.get_positions,
+        "alice_blue": alice_client.get_positions,
+        "indmoney": indmoney_client.get_positions,
+    }
+    out: List[dict] = []
+    errors: dict = {}
+    for name, fn in fetchers.items():
+        client = {"dhan": dhan_client, "alice_blue": alice_client, "indmoney": indmoney_client}[name]
+        if not client.is_authenticated(user_id):
+            continue
+        try:
+            out.extend(await asyncio.to_thread(fn, user_id))
+        except Exception as e:
+            errors[name] = str(e)
+    return out, errors
+
+
+async def _execute_kill(user_id: str, now: Optional[datetime] = None) -> dict:
+    """Cancel stoplosses, then market-sell every long equity position. Runs once."""
+    now = now or datetime.now(timezone.utc)
+    err = await _ensure_dhan(user_id)
+    notes: List[str] = []
+    cancelled: list = []
+    if dhan_client.is_authenticated(user_id):
+        try:
+            cancelled = await asyncio.to_thread(dhan_client.cancel_open_sl_orders, user_id)
+            notes.append(f"cancelled {len(cancelled)} Dhan stoploss order(s)")
+        except Exception as e:
+            notes.append(f"could not cancel Dhan stoploss orders: {e}")
+    elif err:
+        notes.append(err)
+
+    positions, errors = await _collect_positions(user_id)
+    for b, e in errors.items():
+        notes.append(f"{b}: could not read positions ({e})")
+
+    sold, failed = 0, 0
+    for pos in positions:
+        qty = int(pos.get("quantity") or 0)
+        if qty <= 0 or not _is_equity_position(pos):
+            continue
+        broker = pos.get("broker", "dhan")
+        sym = pos["symbol"]
+        status, oid, msg = await asyncio.to_thread(
+            _route_order, user_id, broker, sym, "S", qty, pos.get("product") or "CNC",
+            pos.get("exchange_segment") or "nse_cm",
+        )
+        ok = status == "success"
+        sold += 1 if ok else 0
+        failed += 0 if ok else 1
+        tl = TradeLog(
+            user_id=user_id, symbol=sym, quantity=qty, transaction_type="S", order_type="MKT",
+            order_id=oid, status=status, message=f"[{broker}] KILL SWITCH: {msg}",
+            source="regime_kill",
+        )
+        tdoc = tl.model_dump()
+        tdoc["created_at"] = tdoc["created_at"].isoformat()
+        await db.trade_logs.insert_one(tdoc)
+
+    await db.regime_settings.update_one(
+        {"user_id": user_id},
+        {"$set": {"pending_kill": False, "last_kill_date": regime.today_ist(now),
+                  "last_kill_at": now.isoformat()}})
+    summary = f"sold {sold} position(s), {failed} failed; " + "; ".join(notes)
+    await _regime_event(user_id, "kill", summary, sold=sold, failed=failed)
+    return {"sold": sold, "failed": failed, "notes": notes}
+
+
+async def _regime_check_for_user(user_id: str, now: Optional[datetime] = None) -> dict:
+    now = now or datetime.now(timezone.utc)
+    st = await db.regime_settings.find_one({"user_id": user_id}, {"_id": 0})
+    if not st or not st.get("enabled"):
+        return {"skipped": "disabled"}
+    sig = await asyncio.to_thread(regime.current_regime, now)
+    if sig is None:
+        await _regime_event(user_id, "data_unavailable",
+                            "Could not read Nifty prices. Nothing was changed.")
+        return {"skipped": "no data"}
+
+    prev = st.get("last_signal")
+    update = {"last_signal": sig["signal"], "sma20": sig["sma20"], "sma50": sig["sma50"],
+              "as_of": sig["as_of"], "last_close": sig["last_close"],
+              "last_checked_at": now.isoformat()}
+    if prev is None:
+        await _regime_event(user_id, "baseline",
+                            f"Starting point: signal is {sig['signal']} "
+                            f"(20-day {sig['sma20']}, 50-day {sig['sma50']}). "
+                            "No selling happens until it turns negative.")
+    elif prev == "positive" and sig["signal"] == "negative":
+        if st.get("mode") == "live":
+            update["pending_kill"] = True
+            await _regime_event(user_id, "turned_negative",
+                                f"Nifty 20-day ({sig['sma20']}) fell below 50-day ({sig['sma50']}). "
+                                "LIVE mode: selling the portfolio.")
+        else:
+            await _regime_event(user_id, "alert",
+                                f"ALERT: Nifty 20-day ({sig['sma20']}) fell below 50-day ({sig['sma50']}). "
+                                "Alert mode: nothing was sold.")
+    elif prev == "negative" and sig["signal"] == "positive":
+        update["pending_kill"] = False
+        await _regime_event(user_id, "rearmed",
+                            f"Signal is positive again (20-day {sig['sma20']}, 50-day {sig['sma50']}).")
+    await db.regime_settings.update_one({"user_id": user_id}, {"$set": update})
+    await _regime_run_pending_kill(user_id, now)
+    return sig
+
+
+async def _regime_run_pending_kill(user_id: str, now: Optional[datetime] = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    st = await db.regime_settings.find_one({"user_id": user_id}, {"_id": 0})
+    if not st or not st.get("enabled") or st.get("mode") != "live" or not st.get("pending_kill"):
+        return
+    if st.get("last_kill_date") == regime.today_ist(now):
+        return                                    # already fired today
+    if not regime.is_market_open(now):
+        return                                    # wait for market hours; stays pending
+    await _execute_kill(user_id, now)
+
+
+def _regime_public(st: Optional[dict]) -> dict:
+    st = st or {}
+    keys = ("enabled", "mode", "block_buys", "last_signal", "sma20", "sma50", "as_of",
+            "last_close", "last_checked_at", "pending_kill", "last_kill_at", "next_check_at")
+    return {"enabled": False, "mode": "alert", "block_buys": True,
+            **{k: st.get(k) for k in keys if k in st}}
+
+
+@api.get("/regime/status")
+async def regime_status(user: User = Depends(require_user)):
+    st = await db.regime_settings.find_one({"user_id": user.user_id}, {"_id": 0})
+    live = await asyncio.to_thread(regime.current_regime)     # fresh read for display
+    return {"settings": _regime_public(st), "current": live}
+
+
+@api.post("/regime/settings")
+async def regime_set_settings(payload: RegimeSettingsInput, user: User = Depends(require_user)):
+    if payload.mode not in ("alert", "live"):
+        raise HTTPException(status_code=400, detail="mode must be alert or live")
+    prev = await db.regime_settings.find_one({"user_id": user.user_id}, {"_id": 0}) or {}
+    if payload.enabled and payload.mode == "live" and prev.get("mode") != "live" and not payload.confirm_live:
+        raise HTTPException(status_code=400,
+                            detail="Live mode sells your portfolio. Confirm that you want it.")
+    now = datetime.now(timezone.utc)
+    fields = {"user_id": user.user_id, "enabled": payload.enabled, "mode": payload.mode,
+              "block_buys": payload.block_buys,
+              "next_check_at": sl_svc.next_daily_run(now, regime.CHECK_HOUR, regime.CHECK_MINUTE).isoformat()}
+    if payload.enabled and not prev.get("enabled"):
+        # fresh start: forget the old signal so the first check sets a clean baseline,
+        # and take the baseline right now so buy-blocking works immediately
+        fields.update({"last_signal": None, "pending_kill": False})
+    if not payload.enabled:
+        fields["pending_kill"] = False
+    await db.regime_settings.update_one({"user_id": user.user_id}, {"$set": fields}, upsert=True)
+    if payload.enabled and not prev.get("enabled"):
+        await _regime_check_for_user(user.user_id)
+    st = await db.regime_settings.find_one({"user_id": user.user_id}, {"_id": 0})
+    return {"ok": True, "settings": _regime_public(st)}
+
+
+@api.get("/regime/events")
+async def regime_events(user: User = Depends(require_user), limit: int = 30):
+    cur = db.regime_events.find({"user_id": user.user_id}, {"_id": 0}).sort("created_at", -1).limit(limit)
+    return {"events": [e async for e in cur]}
+
+
+async def _regime_scheduler_tick() -> None:
+    """Called from the scheduler loop every 30 s."""
+    now = datetime.now(timezone.utc)
+    async for st in db.regime_settings.find({"enabled": True}, {"_id": 0}):
+        uid = st["user_id"]
+        try:
+            due = True
+            try:
+                due = datetime.fromisoformat(st["next_check_at"]) <= now
+            except Exception:
+                pass
+            if due:
+                await _regime_check_for_user(uid, now)
+                await db.regime_settings.update_one(
+                    {"user_id": uid},
+                    {"$set": {"next_check_at": sl_svc.next_daily_run(
+                        now, regime.CHECK_HOUR, regime.CHECK_MINUTE).isoformat()}})
+            else:
+                await _regime_run_pending_kill(uid, now)
+        except Exception as e:
+            logger.error("[regime] tick failed for %s: %s", uid, e)
 
 
 # =============================================================================

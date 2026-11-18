@@ -189,6 +189,25 @@ def find_open_sl(user_id: str, security_id) -> Optional[dict]:
     return None
 
 
+def cancel_open_sl_orders(user_id: str) -> list:
+    """Cancel every still-open SELL stop-loss order. Returns the cancelled order ids."""
+    orders = _rest(user_id, "GET", "/orders")
+    if isinstance(orders, dict):
+        orders = orders.get("data") or []
+    cancelled = []
+    for o in orders or []:
+        if str(o.get("transactionType", "")).upper() != "SELL":
+            continue
+        if str(o.get("orderType", "")).upper() not in ("STOP_LOSS", "STOP_LOSS_MARKET"):
+            continue
+        if str(o.get("orderStatus", "")).upper() not in _OPEN_STATUSES:
+            continue
+        oid = str(o.get("orderId"))
+        _rest(user_id, "DELETE", f"/orders/{oid}")
+        cancelled.append(oid)
+    return cancelled
+
+
 def modify_sl(user_id: str, order_id: str, quantity: int, price: float, trigger_price: float) -> dict:
     cid, _ = _creds.get(user_id, (None, None))
     body = {
